@@ -1,0 +1,14 @@
+[Unit]
+Description=NSE market data daily collection
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=nse
+WorkingDirectory=/opt/nse-market-collector
+Environment=NSE_POLITE_DELAY=2.5
+# use the venv python; -m runs the full daily job
+ExecStart=/opt/nse-market-collector/.venv/bin/python -m nse_collector
+# don't hammer NSE if it hangs
+TimeoutStartSec=3600

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run NSE collector Mon-Fri after market close (18:30 IST)
+
+[Timer]
+# 18:30 Asia/Kolkata, weekdays only. Persistent = catch up if the box was off.
+OnCalendar=Mon..Fri 18:30 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,56 @@
+run_ts,dataset,kind,target,rows_in,rows_written,total_rows,path,status
+2026-07-20 12:31:11,bulk_deals,date_range,2026-07-15..2026-07-16,249,249,249,data\bulk_deals\bulk_deals.csv,ok
+2026-07-20 12:31:13,bhavcopy_delivery,per_date,2026-07-15,3256,3256,3256,data\bhavcopy_delivery\bhavcopy_delivery_2026-07-15.csv,ok
+2026-07-20 12:31:15,bhavcopy_delivery,per_date,2026-07-16,3275,3275,3275,data\bhavcopy_delivery\bhavcopy_delivery_2026-07-16.csv,ok
+2026-07-20 12:31:30,bulk_deals,date_range,2026-07-15..2026-07-16,249,249,249,data\bulk_deals\bulk_deals.csv,ok
+2026-07-20 12:31:40,top_gainers,snapshot,2026-07-20,128,128,92,data\top_gainers\top_gainers.csv,ok
+2026-07-20 12:31:42,total_traded_stocks,snapshot,2026-07-20,3216,3216,3216,data\total_traded_stocks\total_traded_stocks.csv,ok
+2026-07-20 12:31:44,advances_declines,snapshot,2026-07-20,4,4,4,data\advances_declines\advances_declines.csv,ok
+2026-07-20 12:55:19,top_gainers,snapshot,2026-07-20,128,128,128,data\top_gainers\top_gainers.csv,ok
+2026-07-20 12:55:22,top_gainers,snapshot,2026-07-20,128,128,128,data\top_gainers\top_gainers.csv,ok
+2026-07-20 12:56:15,mwpl,snapshot,2026-07-20,0,0,,,error: mwpl is a stub — wire it to the live NSE MWPL source and verify output
+2026-07-20 13:42:47,bulk_deals,date_range,2026-07-20..2026-07-20,0,0,,,error: either or both from_date = 2026-07-20 00:00:00 || to_date = 2026-07-20 00:00:00 are not valid value
+2026-07-20 13:43:01,block_deals,date_range,2026-07-20..2026-07-20,0,0,,,error: either or both from_date = 2026-07-20 00:00:00 || to_date = 2026-07-20 00:00:00 are not valid value
+2026-07-20 13:43:15,short_selling,date_range,2026-07-20..2026-07-20,0,0,,,error: either or both from_date = 2026-07-20 00:00:00 || to_date = 2026-07-20 00:00:00 are not valid value
+2026-07-20 13:43:29,corporate_actions,date_range,2026-07-20..2026-07-20,0,0,,,error: either or both from_date = 2026-07-20 00:00:00 || to_date = 2026-07-20 00:00:00 are not valid value
+2026-07-20 13:43:32,top_gainers,snapshot,2026-07-20,129,129,153,data\top_gainers\top_gainers.csv,ok
+2026-07-20 13:43:46,top_losers,snapshot,2026-07-20,0,0,,,"error: 'losers' not a valid parameter :: select from ['gainers', 'loosers']"
+2026-07-20 13:43:48,most_active_value,snapshot,2026-07-20,20,20,20,data\most_active_value\most_active_value.csv,ok
+2026-07-20 13:43:51,most_active_volume,snapshot,2026-07-20,20,20,20,data\most_active_volume\most_active_volume.csv,ok
+2026-07-20 13:43:54,total_traded_stocks,snapshot,2026-07-20,3262,3262,3269,data\total_traded_stocks\total_traded_stocks.csv,ok
+2026-07-20 13:43:56,all_indices,snapshot,2026-07-20,139,139,139,data\all_indices\all_indices.csv,ok
+2026-07-20 13:43:58,bulk_deals,date_range,2026-07-15..2026-07-20,367,367,367,data\bulk_deals\bulk_deals.csv,ok
+2026-07-20 13:44:00,block_deals,date_range,2026-07-15..2026-07-20,0,0,0,data\block_deals\block_deals.csv,empty
+2026-07-20 13:44:00,index_performances,snapshot,2026-07-20,139,139,139,data\index_performances\index_performances.csv,ok
+2026-07-20 13:44:03,most_active_underlying,snapshot,2026-07-20,215,215,215,data\most_active_underlying\most_active_underlying.csv,ok
+2026-07-20 13:44:27,bulk_deals,date_range,2026-07-15..2026-07-20,367,367,367,data\bulk_deals\bulk_deals.csv,ok
+2026-07-20 13:44:30,block_deals,date_range,2026-07-15..2026-07-20,0,0,0,data\block_deals\block_deals.csv,empty
+2026-07-20 13:44:32,short_selling,date_range,2026-07-15..2026-07-20,279,279,279,data\short_selling\short_selling.csv,ok
+2026-07-20 13:44:35,corporate_actions,date_range,2026-07-15..2026-07-20,82,82,82,data\corporate_actions\corporate_actions.csv,ok
+2026-07-20 13:44:38,top_gainers,snapshot,2026-07-20,129,129,157,data\top_gainers\top_gainers.csv,ok
+2026-07-20 13:44:52,top_losers,snapshot,2026-07-20,0,0,,,"error: 'losers' not a valid parameter :: select from ['gainers', 'loosers']"
+2026-07-20 13:44:54,most_active_value,snapshot,2026-07-20,20,20,20,data\most_active_value\most_active_value.csv,ok
+2026-07-20 13:44:57,most_active_volume,snapshot,2026-07-20,20,20,20,data\most_active_volume\most_active_volume.csv,ok
+2026-07-20 13:44:59,total_traded_stocks,snapshot,2026-07-20,3262,3262,3269,data\total_traded_stocks\total_traded_stocks.csv,ok
+2026-07-20 13:45:02,all_indices,snapshot,2026-07-20,139,139,139,data\all_indices\all_indices.csv,ok
+2026-07-20 13:45:05,index_performances,snapshot,2026-07-20,139,139,139,data\index_performances\index_performances.csv,ok
+2026-07-20 13:45:07,most_active_underlying,snapshot,2026-07-20,215,215,402,data\most_active_underlying\most_active_underlying.csv,ok
+2026-07-20 13:45:30,week52_high_low,per_date,2026-07-20,5686,5686,5686,data\week52_high_low\week52_high_low_2026-07-20.csv,ok
+2026-07-20 13:46:11,pe_ratio,per_date,2026-07-20,2270,2270,2270,data\pe_ratio\pe_ratio_2026-07-20.csv,ok
+2026-07-20 13:46:33,top_losers,snapshot,2026-07-20,118,118,118,data\top_losers\top_losers.csv,ok
+2026-07-20 13:47:22,all_indices,snapshot,2026-07-20,139,139,139,data\all_indices\all_indices.csv,ok
+2026-07-20 13:48:04,bulk_deals,date_range,2026-07-15..2026-07-20,367,367,367,data\bulk_deals\bulk_deals.csv,ok
+2026-07-20 13:48:07,block_deals,date_range,2026-07-15..2026-07-20,0,0,0,data\block_deals\block_deals.csv,empty
+2026-07-20 13:48:10,short_selling,date_range,2026-07-15..2026-07-20,279,279,279,data\short_selling\short_selling.csv,ok
+2026-07-20 13:48:12,corporate_actions,date_range,2026-07-15..2026-07-20,82,82,164,data\corporate_actions\corporate_actions.csv,ok
+2026-07-20 13:48:15,top_gainers,snapshot,2026-07-20,129,129,164,data\top_gainers\top_gainers.csv,ok
+2026-07-20 13:48:18,top_losers,snapshot,2026-07-20,117,117,123,data\top_losers\top_losers.csv,ok
+2026-07-20 13:48:21,most_active_value,snapshot,2026-07-20,20,20,20,data\most_active_value\most_active_value.csv,ok
+2026-07-20 13:48:23,most_active_volume,snapshot,2026-07-20,20,20,20,data\most_active_volume\most_active_volume.csv,ok
+2026-07-20 13:48:26,total_traded_stocks,snapshot,2026-07-20,3265,3265,3272,data\total_traded_stocks\total_traded_stocks.csv,ok
+2026-07-20 13:48:29,all_indices,snapshot,2026-07-20,139,139,139,data\all_indices\all_indices.csv,ok
+2026-07-20 13:48:31,index_performances,snapshot,2026-07-20,139,139,139,data\index_performances\index_performances.csv,ok
+2026-07-20 13:48:36,most_active_underlying,snapshot,2026-07-20,215,215,600,data\most_active_underlying\most_active_underlying.csv,ok
+2026-07-20 13:50:34,securities_in_ban,per_date,2026-07-20,1,1,1,data\securities_in_ban\securities_in_ban_2026-07-20.csv,ok
+2026-07-20 13:51:01,advances_declines,snapshot,2026-07-20,4,4,4,data\advances_declines\advances_declines.csv,ok
+2026-07-20 13:51:15,mwpl,snapshot,2026-07-20,0,0,,,error: mwpl is a stub - wire it to the live NSE MWPL source and verify output
