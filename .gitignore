@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Fetched / generated data
+data/
+bse/data/
+concall-data/
+index_history/
+
+# Runtime state
+data/_watchlist.json
+data/_watchlist_state.json
+*.sqlite
+*.db
+
+# Logs
+logs/
+*.log
+
+# Streamlit local state
+.streamlit/secrets.toml
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

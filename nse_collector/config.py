@@ -78,6 +78,8 @@ DATASETS: list[dict] = [
      "fn": "capital_market.short_selling_data", "params": {}, "key": None},
     {"name": "corporate_actions", "kind": "date_range", "group": "corporate",
      "fn": "capital_market.corporate_actions_for_equity", "params": {}, "key": None},
+    {"name": "earnings_calendar", "kind": "date_range", "group": "filings",
+     "fn": "capital_market.event_calendar_for_equity", "params": {}, "key": None},
 
     # ---- snapshot: live state only, cannot be backfilled ----
     # gainers/losers repeat a symbol across index buckets -> key includes legend

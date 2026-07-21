@@ -200,6 +200,126 @@ Backfill is idempotent — re-running skips dates already on disk. Snapshots are
 
 ---
 
+## Dashboard (investor view)
+
+A Streamlit app reads the warehouse directly. Install deps (`requirements.txt`
+already includes `streamlit` + `xlrd`) then:
+
+```bash
+python -m streamlit run dashboard/app.py
+```
+
+(Use `python -m streamlit` — the bare `streamlit` command only works if
+Python's Scripts dir is on PATH.)
+
+Tabs, all built for an investor reading the day's tape:
+
+| tab | what it answers |
+|-----|-----------------|
+| 📊 **Market Pulse** | Breadth (advances/declines, A/D ratio), headline index cards, full index table with **P/E, P/B, div yield + 30d/365d momentum** (valuation heatmap), best/worst indices |
+| 🚀 **Movers** | Top gainers/losers by index bucket, most active by value & volume |
+| 💰 **Smart Money** | Bulk & block deals (side + symbol filter, deal value in ₹Cr), short selling, upcoming corporate actions (ex-date ahead) |
+| 📉 **Derivatives & FII** | Participant net index-future positioning (FII/DII/Client/Pro — who's directional), FII net buy/sell by instrument, most active underlyings, F&O ban list |
+| 🎯 **Delivery & Value** | **Delivery % leaders** (conviction accumulation = high delivery + price up), P/E lookup, highest-volatility underlyings |
+| 🎯 **Signals** | Decision-support (see below) |
+| 📈 **History** | Per-symbol OHLC candlestick + volume + delivery-% trend, built from the bhav copies you've collected/backfilled. Extends as you backfill more dates. |
+| 🩺 **Data Health** | Last collection per dataset, row counts, freshness (from `_manifest.csv`) |
+
+### 🎯 Signals — decision-support, not advice
+
+Transparent buy/sell *evidence* from the data. Every score is the sum of named
+factors, each shown with a plain-English reason — no black box, no price
+prediction. Educational only.
+
+- **Market regime** — Risk-On / Neutral / Risk-Off from A/D ratio, % indices
+  green, and India VIX. Answers "is this an environment to buy?"
+- **Stock scorecard** — type a symbol → factor breakdown (delivery conviction,
+  accumulation vs distribution, bulk/block smart-money, F&O-ban & volatility
+  risk, P/E) → composite verdict (Accumulation / Neutral / Caution / Avoid).
+- **Screeners** — accumulation candidates (high delivery + up), distribution
+  warnings (high delivery + down), **52-week breakouts** (at/near 52wk high),
+  institutional buys (bulk deals by value).
+- **Today's top ideas** — the high-delivery/up universe re-scored across all
+  factors and ranked.
+- **Watchlist** — persistent (`data/_watchlist.json`); each symbol scored daily.
+  **Alerts** flag when a watched symbol's signal turns cautious / weakens /
+  strengthens vs the last run (state in `data/_watchlist_state.json`).
+- **Delivery-% trend** — per-symbol multi-day delivery chart in the scorecard
+  (needs a few collected days; rising delivery = growing conviction).
+
+Market Pulse also shows a **breadth donut** (advances / declines / unchanged).
+
+**Symbol autocomplete** — every symbol picker is a searchable dropdown showing
+`SYMBOL — Company Name`, backed by the full listed-equity master (`equity_master`
+dataset, ~2400 names from NSE's public `EQUITY_L.csv`; `nselib.equity_list()` is
+broken in 2.5.1). Collect it with `python -m nse_collector --dataset equity_master`
+(also runs in the daily job). Falls back to the latest bhav copy's symbols if the
+master isn't collected yet.
+
+Logic lives in `dashboard/signals.py` (pure functions, unit-tested offline).
+Signals sharpen as the warehouse accumulates history; with only a few days
+collected, valuation/trend context is limited — the code does not fake it.
+
+The app is cached (5 min TTL); hit **🔄 Reload data** in the sidebar after a
+fresh collection. Missing datasets show a hint, never an error — so it works
+even before the first full collection.
+
+Storage reads are isolated in `dashboard/loader.py` (mirrors `storage.py`) —
+swap both to DuckDB/parquet without touching the UI.
+
+## BSE data (separate from the NSE library-first pipeline)
+
+BSE has no clean library, so `bse/` is a small isolated scraper for data **not**
+covered by NSE — the **BSE EOD bhav copy** (BSE-listed universe, ~4800–5300
+scrips, many BSE-only), from bseindia.com's UDiFF CSV. It reuses the NSE
+collector's storage, calendar and settings, and stores per-date files
+`data/bse_bhavcopy/bse_bhavcopy_<date>.csv`.
+
+```bash
+python -m bse                                       # today's BSE bhav copy
+python -m bse --backfill --from 2026-07-01 --to 2026-07-17
+```
+
+Or from the dashboard sidebar → **Fetch BSE data** (fetch latest / backfill).
+The **📈 History** tab has an **NSE / BSE** toggle to chart either exchange
+(BSE has OHLC + volume; no delivery %).
+
+BSE gates its endpoints and changes them often — fetchers degrade gracefully
+(blocked/holiday date → skip, never crash). Only the bhav copy is confirmed
+working; add more BSE endpoints in `bse/fetchers.py` as you verify them. NSE
+already covers deals, gainers, indices etc., so those are intentionally not
+duplicated from BSE.
+
+## Datewise history for "live-only" data
+
+NSE/BSE archive EOD reports per date (bhav copy etc.) but do **not** archive live
+snapshots (gainers, most active, breadth). Those are recomputed datewise:
+
+- **🗓️ Day Explorer tab** — pick any collected trading date → breadth (cards +
+  donut), gainers, losers, most active, all **derived from that day's bhav copy**
+  (`dashboard/derive.py`). Works retroactively for every date you've backfilled.
+- **Index EOD history** — real NSE archive via `index_data`
+  (`nse_collector/index_history.py`), stored per index at
+  `data/index_history/index_history_<INDEX>.csv`. In the **📈 History** tab pick
+  **NSE index** → Fetch/refresh → candlestick.
+- Option-chain OI stays daily-capture only (no exchange archive exists).
+
+## Concalls (fundamentals view)
+
+Drop Claude-generated concall analysis MDs under `concall-data/<quarter>/`
+(e.g. `concall-data/Q4FY26/Company_Q4FY26.md`). The **📞 Concalls** page
+auto-detects quarters and parses each file's header
+(`**Verdict:** … **Classification:** … **Management Confidence:** n/10`):
+
+- Overview strip (companies, BUY count, HOLD/AVOID, avg confidence)
+- Filterable/searchable table with verdict + call badges
+- Full-analysis reader (rendered markdown)
+- Best-effort **company → symbol** match shows the stock's **live signal
+  scorecard** beside the concall — fundamentals + technicals/flows together
+
+Files with a different layout (no verdict header) still list and render; they
+just show a blank verdict. Add new quarters by dropping a folder — no code change.
+
 ## Config via environment
 
 | var | default | meaning |

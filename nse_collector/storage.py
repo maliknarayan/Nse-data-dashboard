@@ -48,6 +48,20 @@ def normalize(obj: Any) -> pd.DataFrame:
     return pd.DataFrame({"value": [obj]})
 
 
+# candidate date columns across datasets, checked in order
+_DATE_COLS = [COLLECTED_ON, "Date", "date", "TradDt", "exDate", "ex_date",
+              "caBroadcastDate", "DATE1"]
+
+
+def _sort_by_date(df: pd.DataFrame) -> pd.DataFrame:
+    """Sort a growing frame chronologically by whatever date column it has."""
+    col = next((c for c in _DATE_COLS if c in df.columns), None)
+    if not col:
+        return df
+    order = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+    return df.assign(_o=order).sort_values("_o", kind="stable").drop(columns="_o")
+
+
 def _effective_key(df: pd.DataFrame, key: list[str] | None) -> list[str]:
     """Preferred key columns that actually exist; else all columns."""
     if key:
@@ -89,6 +103,12 @@ class NseWarehouse:
         if snapshot and COLLECTED_ON in merged.columns and COLLECTED_ON not in subset:
             subset = subset + [COLLECTED_ON]
         merged = merged.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
+        merged = _sort_by_date(merged).reset_index(drop=True)
+
+        # safety net: never silently shrink a growing file — keep a .bak first
+        if len(existing) and len(merged) < len(existing) and os.path.exists(path):
+            import shutil
+            shutil.copy2(path, path + ".bak")
 
         self._atomic_write(path, merged)
         return rows_in, len(merged)
