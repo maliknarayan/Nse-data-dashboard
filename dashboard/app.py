@@ -24,9 +24,19 @@ from dashboard import watchlist as W  # noqa: E402
 from dashboard import derive as D  # noqa: E402
 from dashboard import insights as I  # noqa: E402
 from dashboard import charts as C  # noqa: E402
+from dashboard.ui import (  # noqa: E402
+    load_growing, load_snapshot_latest, load_per_date, per_date_dates,
+    load_per_date_all, load_manifest, all_symbols, company_map, symbol_history,
+    bse_symbols, bse_symbol_history, index_history, index_names, concall_quarters,
+    concall_index, concall_text, match_symbol, SYMBOLS, NAMES, symbol_select,
+    _hint, _num, card, _collector, _bse_collector, _conv_data,
+)
 
 st.set_page_config(page_title="NSE Investor Dashboard", page_icon="📈", layout="wide",
                    initial_sidebar_state="expanded")
+# NOTE: this file is Streamlit's entrypoint (__main__). Shared helpers/cached
+# loaders live in dashboard/ui.py, never here — a submodule importing this
+# file by module path would re-run it whole (double st.set_page_config crash).
 st.markdown(T.CSS, unsafe_allow_html=True)
 st.markdown(T.POLISH, unsafe_allow_html=True)
 st.markdown(T.RESPONSIVE, unsafe_allow_html=True)
@@ -50,57 +60,6 @@ components.html(T.MOUSE_GLOW_JS, height=0)
 # dark charts for dark themes, light chart ink for light themes
 _DARK = _theme in ("Midnight", "Aurora")
 
-# cache the warehouse reads; sidebar button clears it after a fresh collection
-_cache = st.cache_data(ttl=300)
-load_growing = _cache(L.load_growing)
-load_snapshot_latest = _cache(L.load_snapshot_latest)
-load_per_date = _cache(L.load_per_date)
-per_date_dates = _cache(L.per_date_dates)
-load_per_date_all = _cache(L.load_per_date_all)
-load_manifest = _cache(L.load_manifest)
-all_symbols = _cache(L.all_symbols)
-company_map = _cache(L.company_map)
-symbol_history = _cache(L.symbol_history)
-bse_symbols = _cache(L.bse_symbols)
-bse_symbol_history = _cache(L.bse_symbol_history)
-index_history = _cache(L.index_history)
-index_names = _cache(L.index_names)
-concall_quarters = _cache(L.concall_quarters)
-concall_index = _cache(L.concall_index)
-concall_text = _cache(L.concall_text)
-match_symbol = _cache(L.match_symbol)
-
-SYMBOLS = all_symbols()
-NAMES = company_map()
-
-
-def symbol_select(label: str, key: str, help: str | None = None) -> str:
-    """Searchable symbol picker (type-ahead). Falls back to free text if the
-    master isn't collected yet."""
-    if SYMBOLS:
-        choice = st.selectbox(label, [""] + SYMBOLS, key=key, help=help,
-                              format_func=lambda s: f"{s} — {NAMES[s]}" if s in NAMES else s)
-        return choice.strip().upper()
-    return st.text_input(label, key=key, help=help).strip().upper()
-
-
-def _hint(msg: str = "No data yet — run the collector to populate this."):
-    st.info(msg)
-
-
-def _num(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
-    df = df.copy()
-    for c in cols:
-        if c in df.columns:
-            df[c] = L.to_num(df[c])
-    return df
-
-
-def card():
-    """A styled card container."""
-    return st.container(border=True)
-
-
 # ---------------------------------------------------------------- sidebar
 st.sidebar.markdown(T.brand("NSE Alpha", "Investor Intelligence"), unsafe_allow_html=True)
 st.sidebar.markdown("")
@@ -119,31 +78,6 @@ NAV = {
 _grp = st.sidebar.radio("Menu", list(NAV.keys()), label_visibility="collapsed", key="nav_group")
 st.sidebar.caption(_grp.split(" ", 1)[1] if " " in _grp else _grp)
 PAGE = st.sidebar.radio("nav", NAV[_grp], label_visibility="collapsed", key="nav_page")
-
-
-def _collector(polite: float = 1.0):
-    from nse_collector.collector import Collector, setup_logging
-    from nse_collector.config import Settings
-    s = Settings()
-    s.data_dir = L.DATA_DIR
-    s.log_dir = os.path.join(os.path.dirname(L.DATA_DIR), "logs")
-    s.polite_delay = polite
-    setup_logging(s)
-    return Collector(s)
-
-
-def _bse_collector(polite: float = 1.0):
-    from bse.collect import BseCollector
-    from nse_collector.collector import setup_logging
-    from nse_collector.config import Settings
-    s = Settings()
-    s.data_dir = L.DATA_DIR
-    s.log_dir = os.path.join(os.path.dirname(L.DATA_DIR), "logs")
-    s.polite_delay = polite
-    setup_logging(s)
-    return BseCollector(s)
-
-
 
 # ---------------------------------------------------------------- hero
 # ---------------------------------------------------------------- top header
@@ -271,13 +205,6 @@ if PAGE == "📊 Market Pulse":
         _hint()
 
 # ================================================================ Conviction
-def _conv_data():
-    return dict(bhav=load_per_date("bhavcopy_delivery"), bulk=load_growing("bulk_deals"),
-                block=load_growing("block_deals"), ban=load_per_date("securities_in_ban"),
-                vol=load_per_date("daily_volatility"), pe=load_per_date("pe_ratio"),
-                most_active=load_snapshot_latest("most_active_value"))
-
-
 if PAGE == "🏆 Conviction":
     st.caption("Conviction leaderboard — stocks with aligned signals. Score combines "
                "delivery, volume, price trend, bulk/block deals, breadth and flows.")
