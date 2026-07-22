@@ -2,3 +2,4 @@ nselib>=2.5.1
 pandas>=2.0
 xlrd>=2.0.1          # nselib reads some NSE reports (FII stats) as .xls
 streamlit>=1.30      # dashboard
+plotly>=6.0          # premium interactive charts

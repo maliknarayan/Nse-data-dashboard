@@ -14,6 +14,7 @@ import sys
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dashboard import loader as L  # noqa: E402
@@ -22,17 +23,32 @@ from dashboard import signals as S  # noqa: E402
 from dashboard import watchlist as W  # noqa: E402
 from dashboard import derive as D  # noqa: E402
 from dashboard import insights as I  # noqa: E402
+from dashboard import charts as C  # noqa: E402
 
 st.set_page_config(page_title="NSE Investor Dashboard", page_icon="📈", layout="wide",
                    initial_sidebar_state="expanded")
 st.markdown(T.CSS, unsafe_allow_html=True)
 st.markdown(T.POLISH, unsafe_allow_html=True)
 st.markdown(T.RESPONSIVE, unsafe_allow_html=True)
-_theme = st.sidebar.selectbox("🎨 Theme", ["Aurora (dark)", "Modern", "Zine"], key="ui_theme")
-if _theme == "Aurora (dark)":
+_theme = st.session_state.get("ui_theme", "Midnight")
+if _theme == "Midnight":
+    st.markdown(T.FILLOW, unsafe_allow_html=True)
+elif _theme == "Daylight":
+    st.markdown(T.STOCKSCANS, unsafe_allow_html=True)
+elif _theme == "Aurora":
     st.markdown(T.AURORA, unsafe_allow_html=True)
 elif _theme == "Zine":
     st.markdown(T.ZINE, unsafe_allow_html=True)
+
+# post-theme overrides (win over every theme block): full-width header + visible toggle
+st.markdown(T.OVERRIDES, unsafe_allow_html=True)
+
+# subtle cursor-follow glow — JS runs in an invisible 0-height component, CSS renders in the main page
+st.markdown(T.MOUSE_GLOW_CSS, unsafe_allow_html=True)
+components.html(T.MOUSE_GLOW_JS, height=0)
+
+# dark charts for dark themes, light chart ink for light themes
+_DARK = _theme in ("Midnight", "Aurora")
 
 # cache the warehouse reads; sidebar button clears it after a fresh collection
 _cache = st.cache_data(ttl=300)
@@ -88,22 +104,21 @@ def card():
 # ---------------------------------------------------------------- sidebar
 st.sidebar.markdown(T.brand("NSE Alpha", "Investor Intelligence"), unsafe_allow_html=True)
 st.sidebar.markdown("")
-if st.sidebar.button("🔄 Reload data"):
-    st.cache_data.clear()
-    st.rerun()
 
 asof = L.snapshot_asof("all_indices") or L.snapshot_asof("top_gainers")
 
-PAGES = ["📊 Market Pulse", "📡 What's New", "💼 Portfolio", "🏆 Conviction",
-         "🎯 Signals", "📞 Concalls", "🚀 Movers", "🗓️ Day Explorer",
-         "💰 Smart Money", "📉 Derivatives & FII", "📦 Delivery & Value",
-         "🧭 Sectors", "🗂️ Filings", "🔔 Need Attention", "📈 History", "🩺 Data Health"]
-PAGE = st.sidebar.radio("nav", PAGES, label_visibility="collapsed")
-
-st.sidebar.markdown("---")
-if asof:
-    st.sidebar.metric("Snapshot as of", asof)
-st.sidebar.caption(f"warehouse: {L.DATA_DIR}")
+NAV = {
+    "📊 Overview": ["📊 Market Pulse", "📡 What's New", "🩺 Data Health", "⚙️ Settings"],
+    "🎯 Ideas & Signals": ["🎯 Signals", "🔎 Screener", "⚖️ Peer Compare",
+                           "🏆 Conviction", "💼 Portfolio"],
+    "📈 Markets": ["🚀 Movers", "🗓️ Day Explorer", "🧭 Sectors", "📈 History"],
+    "💰 Flows & Derivatives": ["💰 Smart Money", "📉 Derivatives & FII",
+                               "🧩 F&O / Options", "📦 Delivery & Value"],
+    "📰 Filings & Calls": ["📞 Concalls", "🗂️ Filings", "🔔 Need Attention"],
+}
+_grp = st.sidebar.radio("Menu", list(NAV.keys()), label_visibility="collapsed", key="nav_group")
+st.sidebar.caption(_grp.split(" ", 1)[1] if " " in _grp else _grp)
+PAGE = st.sidebar.radio("nav", NAV[_grp], label_visibility="collapsed", key="nav_page")
 
 
 def _collector(polite: float = 1.0):
@@ -117,61 +132,18 @@ def _collector(polite: float = 1.0):
     return Collector(s)
 
 
-st.sidebar.markdown("### ⚙️ Fetch data")
-with st.sidebar.expander("Run collector from here", expanded=False):
-    if st.button("⬇️ Fetch latest (daily job)", key="fetch_daily", width="stretch"):
-        with st.spinner("Fetching from NSE… (snapshots + today's reports)"):
-            summ = _collector().run_daily()
-        st.success(f"Done — {summ.line()}")
-        st.cache_data.clear()
+def _bse_collector(polite: float = 1.0):
+    from bse.collect import BseCollector
+    from nse_collector.collector import setup_logging
+    from nse_collector.config import Settings
+    s = Settings()
+    s.data_dir = L.DATA_DIR
+    s.log_dir = os.path.join(os.path.dirname(L.DATA_DIR), "logs")
+    s.polite_delay = polite
+    setup_logging(s)
+    return BseCollector(s)
 
-    st.caption("Backfill past dates (historical / per-date reports)")
-    _today = dt.date.today()
-    bf_from = st.date_input("From", value=_today - dt.timedelta(days=7), key="bf_from")
-    bf_to = st.date_input("To", value=_today, key="bf_to")
-    if st.button("⏪ Backfill range", key="bf_btn", width="stretch"):
-        if bf_from > bf_to:
-            st.error("From date must be ≤ To date.")
-        else:
-            with st.spinner(f"Backfilling {bf_from} → {bf_to}…"):
-                summ = _collector().run_backfill(bf_from, bf_to)
-            st.success(f"Done — {summ.line()}")
-            st.cache_data.clear()
-    st.caption("Snapshots (gainers, breadth, option chain) are live-only and "
-               "cannot be backfilled — only per-date reports & deal windows.")
 
-with st.sidebar.expander("Fetch BSE data", expanded=False):
-    st.caption("BSE EOD bhav copy (BSE-listed universe, ~4800 scrips) — the "
-               "non-overlapping BSE data. Scraped from bseindia.com.")
-
-    def _bse_collector(polite: float = 1.0):
-        from bse.collect import BseCollector
-        from nse_collector.collector import setup_logging
-        from nse_collector.config import Settings
-        s = Settings()
-        s.data_dir = L.DATA_DIR
-        s.log_dir = os.path.join(os.path.dirname(L.DATA_DIR), "logs")
-        s.polite_delay = polite
-        setup_logging(s)
-        return BseCollector(s)
-
-    if st.button("⬇️ Fetch latest BSE", key="bse_daily", width="stretch"):
-        with st.spinner("Fetching BSE bhav copy…"):
-            summ = _bse_collector().run_daily()
-        st.success(f"Done — {summ.line()}")
-        st.cache_data.clear()
-    bse_from = st.date_input("From", value=dt.date.today() - dt.timedelta(days=7), key="bse_from")
-    bse_to = st.date_input("To", value=dt.date.today(), key="bse_to")
-    if st.button("⏪ Backfill BSE range", key="bse_bf", width="stretch"):
-        if bse_from > bse_to:
-            st.error("From date must be ≤ To date.")
-        else:
-            with st.spinner(f"Backfilling BSE {bse_from} → {bse_to}…"):
-                summ = _bse_collector().run_backfill(bse_from, bse_to)
-            st.success(f"Done — {summ.line()}")
-            st.cache_data.clear()
-st.sidebar.markdown("---")
-st.sidebar.caption("Signals are educational, from public data — not investment advice.")
 
 # ---------------------------------------------------------------- hero
 # ---------------------------------------------------------------- top header
@@ -190,7 +162,13 @@ if not _ad.empty and {"metric", "value"} <= set(_ad.columns):
     _m = dict(zip(_ad["metric"], L.to_num(_ad["value"])))
     _r = (_m.get("Advances", 0) / _m.get("Declines", 1)) if _m.get("Declines") else 0
     _chips.append(("A/D ratio", f"{_r:.2f}", "up" if _r > 1 else "down"))
-st.markdown(T.topbar(_chips), unsafe_allow_html=True)
+with st.container(key="topbar_row"):
+    _hc1, _hc2 = st.columns([5, 1], gap="small", vertical_alignment="center")
+    with _hc1:
+        st.markdown(T.topbar(_chips), unsafe_allow_html=True)
+    with _hc2:
+        st.selectbox("Theme", ["Midnight", "Daylight", "Aurora", "Modern", "Zine"],
+                    key="ui_theme", label_visibility="collapsed")
 
 st.markdown(T.hero(f"{PAGE}",
                    f"NSE / BSE investor dashboard &nbsp;|&nbsp; as of {asof or '—'}"),
@@ -213,24 +191,38 @@ if PAGE == "📊 Market Pulse":
             T.stat_card("Unchanged", f"{unc:,}", "flat", "neutral"),
         ]
         st.markdown(T.stat_row(cards), unsafe_allow_html=True)
+        _tot = adv + dec + unc
+        if _tot:
+            _as = adv / _tot * 100
+            st.markdown(T.progress(_as, "success" if _as >= 50 else "danger",
+                        f"Advances share · {_as:.0f}%"), unsafe_allow_html=True)
         dcol, _sp = st.columns([1, 2])
         with dcol:
             with card():
                 st.markdown("#### Breadth split")
-                donut = pd.DataFrame({"cat": ["Advances", "Declines", "Unchanged"],
-                                      "count": [adv, dec, unc]})
-                st.vega_lite_chart(donut, {
-                    "width": "container", "height": 200,
-                    "mark": {"type": "arc", "innerRadius": 55},
-                    "encoding": {
-                        "theta": {"field": "count", "type": "quantitative"},
-                        "color": {"field": "cat", "type": "nominal",
-                                  "scale": {"domain": ["Advances", "Declines", "Unchanged"],
-                                            "range": [T.GREEN, T.CORAL, "#B8BCCB"]},
-                                  "legend": {"title": None}},
-                        "tooltip": [{"field": "cat"}, {"field": "count"}],
-                    },
-                })
+                C.show(C.donut(["Advances", "Declines", "Unchanged"], [adv, dec, unc],
+                               [T.GREEN, T.CORAL, "#B8BCCB"], _DARK,
+                               center=f"{adv + dec + unc:,}"))
+        with _sp:
+            with card():
+                st.markdown("#### 🧭 Sector heatmap")
+                _si = load_snapshot_latest("all_indices")
+                if not _si.empty and "index" in _si.columns:
+                    _si = _num(_si.copy(), ["percentChange"])
+                    if "key" in _si.columns and _si["key"].astype(str).str.contains("Sector", case=False).any():
+                        _sec = _si[_si["key"].astype(str).str.contains("Sector", case=False)]
+                    else:
+                        _kw = "IT|BANK|PHARMA|AUTO|FMCG|METAL|ENERGY|REALTY|MEDIA|FINANC|HEALTH|PSU|CONSUM|INFRA|OIL|CHEM"
+                        _sec = _si[_si["index"].astype(str).str.upper().str.contains(_kw)]
+                    _sec = _sec.dropna(subset=["percentChange"]).sort_values("percentChange", ascending=False)
+                    if not _sec.empty:
+                        _rows = list(zip(_sec["index"].astype(str).str.replace("NIFTY ", "", regex=False),
+                                         _sec["percentChange"]))
+                        st.markdown(T.heatmap(_rows), unsafe_allow_html=True)
+                    else:
+                        _hint("No sector indices in the collected snapshot.")
+                else:
+                    _hint()
     else:
         _hint()
 
@@ -270,11 +262,11 @@ if PAGE == "📊 Market Pulse":
         with b1:
             with card():
                 st.markdown("#### Top 10 gaining indices")
-                st.bar_chart(rank.nlargest(10), color=T.GREEN, horizontal=True)
+                C.show(C.hbar(rank.nlargest(10), _DARK, color=T.GREEN))
         with b2:
             with card():
                 st.markdown("#### Top 10 losing indices")
-                st.bar_chart(rank.nsmallest(10), color=T.CORAL, horizontal=True)
+                C.show(C.hbar(rank.nsmallest(10), _DARK, color=T.CORAL))
     else:
         _hint()
 
@@ -355,7 +347,7 @@ if PAGE == "📡 What's New":
         st.markdown("#### 🏦 FII vs Client — net index futures trend")
         if not fii_div.empty:
             cols = [c for c in ["FII", "Client", "DII", "Pro"] if c in fii_div.columns]
-            st.line_chart(fii_div.set_index("date")[cols])
+            C.show(C.lines(fii_div.set_index("date")[cols], _DARK))
         else:
             _hint("Needs participant OI for 2+ days.")
 
@@ -459,7 +451,7 @@ if PAGE == "🎯 Signals":
                 if len(t) > 1:
                     t["Delivery %"] = L.to_num(t["DELIV_PER"])
                     st.markdown("**Delivery % trend** — rising delivery = growing conviction")
-                    st.line_chart(t.set_index("_date")["Delivery %"], color=T.INDIGO)
+                    C.show(C.lines(t.set_index("_date")["Delivery %"], _DARK, colors=[T.INDIGO], area=True))
         else:
             st.info("Enter a symbol to generate its scorecard.")
 
@@ -573,6 +565,10 @@ if PAGE == "📞 Concalls":
                 T.stat_card("Avg confidence", f"{conf.mean():.1f}/10" if conf.notna().any() else "—",
                             "mgmt tone", "neutral"),
             ]), unsafe_allow_html=True)
+            if len(idx):
+                _bs = buy / len(idx) * 100
+                st.markdown(T.progress(_bs, "success", f"BUY verdicts · {_bs:.0f}%"),
+                            unsafe_allow_html=True)
 
             with card():
                 st.markdown("#### All concalls")
@@ -712,8 +708,7 @@ if PAGE == "📉 Derivatives & FII":
                            "Total Long Contracts", "Total Short Contracts"])
             p = p[p["Client Type"].astype(str).str.upper() != "TOTAL"]
             p["Net Index Fut"] = p["Future Index Long"] - p["Future Index Short"]
-            st.bar_chart(p.set_index("Client Type")["Net Index Fut"],
-                         color=T.INDIGO, horizontal=True)
+            C.show(C.hbar(p.set_index("Client Type")["Net Index Fut"], _DARK, diverge=True))
             st.dataframe(p[["Client Type", "Future Index Long", "Future Index Short",
                             "Net Index Fut", "Total Long Contracts", "Total Short Contracts"]],
                          width="stretch", hide_index=True)
@@ -726,7 +721,7 @@ if PAGE == "📉 Derivatives & FII":
         if not fii.empty and "fii_derivatives" in fii.columns:
             f = _num(fii, ["buy_value_in_Cr", "sell_value_in_Cr", "open_contracts_value_in_Cr"])
             f["Net Buy (Cr)"] = f["buy_value_in_Cr"] - f["sell_value_in_Cr"]
-            st.bar_chart(f.set_index("fii_derivatives")["Net Buy (Cr)"], color=T.CORAL)
+            C.show(C.hbar(f.set_index("fii_derivatives")["Net Buy (Cr)"], _DARK, diverge=True))
             st.dataframe(f[["fii_derivatives", "buy_value_in_Cr", "sell_value_in_Cr",
                             "Net Buy (Cr)", "open_contracts_value_in_Cr"]],
                          width="stretch", hide_index=True)
@@ -840,7 +835,7 @@ if PAGE == "🧭 Sectors":
             ]), unsafe_allow_html=True)
             with card():
                 st.markdown("#### Today's sector move")
-                st.bar_chart(sec.set_index("index")["percentChange"], color=T.INDIGO, horizontal=True)
+                C.show(C.hbar(sec.set_index("index")["percentChange"], _DARK, diverge=True))
             with card():
                 st.markdown("#### Sector trend table (today / 30d / 365d + valuation)")
                 v = sec[["index", "percentChange", "perChange30d", "perChange365d", "pe", "pb", "dy"]].copy()
@@ -1005,38 +1000,21 @@ if PAGE == "📈 History":
                     recs = h[["date", "OPEN_PRICE", "HIGH_PRICE", "LOW_PRICE", "CLOSE_PRICE"]].rename(
                         columns={"OPEN_PRICE": "open", "HIGH_PRICE": "high",
                                  "LOW_PRICE": "low", "CLOSE_PRICE": "close"})
-                    color = {"condition": {"test": "datum.open <= datum.close", "value": T.GREEN},
-                             "value": T.CORAL}
-                    st.vega_lite_chart(recs, {
-                        "width": "container", "height": 360,
-                        "encoding": {"x": {"field": "date", "type": "temporal", "title": None}},
-                        "layer": [
-                            {"mark": "rule",
-                             "encoding": {"y": {"field": "low", "type": "quantitative",
-                                                "scale": {"zero": False}, "title": "Price"},
-                                          "y2": {"field": "high"}, "color": color}},
-                            {"mark": {"type": "bar", "size": 6},
-                             "encoding": {"y": {"field": "open", "type": "quantitative"},
-                                          "y2": {"field": "close"}, "color": color,
-                                          "tooltip": [{"field": "date"}, {"field": "open"},
-                                                      {"field": "high"}, {"field": "low"},
-                                                      {"field": "close"}]}},
-                        ],
-                    })
+                    C.show(C.candlestick(recs, _DARK))
 
             cH1, cH2 = st.columns(2)
             with cH1:
                 with card():
                     st.markdown("#### Volume traded")
-                    st.bar_chart(h.set_index("date")["TTL_TRD_QNTY"], color=T.INDIGO)
+                    C.show(C.bars(h.set_index("date")["TTL_TRD_QNTY"], _DARK))
             with cH2:
                 with card():
                     if has_deliv:
                         st.markdown("#### Delivery % trend")
-                        st.line_chart(h.set_index("date")["DELIV_PER"], color=T.GREEN)
+                        C.show(C.lines(h.set_index("date")["DELIV_PER"], _DARK, colors=[T.GREEN], area=True))
                     else:
                         st.markdown("#### Close price trend")
-                        st.line_chart(h.set_index("date")["CLOSE_PRICE"], color=T.GREEN)
+                        C.show(C.lines(h.set_index("date")["CLOSE_PRICE"], _DARK, colors=[T.GREEN], area=True))
     else:
         st.info("Search a symbol to see its history.")
 
@@ -1061,21 +1039,20 @@ if PAGE == "🗓️ Day Explorer":
                         "bullish" if ratio > 1 else "bearish", "up" if ratio > 1 else "down"),
             T.stat_card("Unchanged", f'{br["Unchanged"]:,}', "flat", "neutral"),
         ]), unsafe_allow_html=True)
+        _tot = adv + dec + br["Unchanged"]
+        if _tot:
+            _as = adv / _tot * 100
+            st.markdown(T.progress(_as, "success" if _as >= 50 else "danger",
+                        f"Advances share · {_as:.0f}%"), unsafe_allow_html=True)
 
         dcol, _sp = st.columns([1, 2])
         with dcol:
             with card():
                 st.markdown("#### Breadth split")
-                st.vega_lite_chart(
-                    pd.DataFrame({"cat": ["Advances", "Declines", "Unchanged"],
-                                  "count": [adv, dec, br["Unchanged"]]}),
-                    {"width": "container", "height": 190,
-                     "mark": {"type": "arc", "innerRadius": 50},
-                     "encoding": {"theta": {"field": "count", "type": "quantitative"},
-                                  "color": {"field": "cat", "type": "nominal",
-                                            "scale": {"domain": ["Advances", "Declines", "Unchanged"],
-                                                      "range": [T.GREEN, T.CORAL, "#B8BCCB"]},
-                                            "legend": {"title": None}}}})
+                C.show(C.donut(["Advances", "Declines", "Unchanged"],
+                               [adv, dec, br["Unchanged"]],
+                               [T.GREEN, T.CORAL, "#B8BCCB"], _DARK,
+                               center=f'{adv + dec + br["Unchanged"]:,}'))
 
         g1, g2 = st.columns(2)
         with g1:
@@ -1121,3 +1098,283 @@ if PAGE == "🩺 Data Health":
                          height=460, hide_index=True)
         else:
             _hint("No manifest yet — run the collector.")
+
+# ================================================================ Screener
+if PAGE == "🔎 Screener":
+    st.caption("Multi-factor stock scan — stack filters (price move, delivery, "
+               "valuation, volatility, distance from 52wk high) to surface names.")
+    bhav = load_per_date("bhavcopy_delivery")
+    if bhav.empty:
+        _hint("Needs the latest bhav copy — fetch/backfill first.")
+    else:
+        b = bhav.copy()
+        if "SERIES" in b.columns:
+            b = b[b["SERIES"] == "EQ"]
+        b = _num(b, ["CLOSE_PRICE", "PREV_CLOSE", "DELIV_PER", "TTL_TRD_QNTY", "TURNOVER_LACS"])
+        b["SYM"] = b["SYMBOL"].astype(str).str.upper()
+        b["%Chg"] = (b["CLOSE_PRICE"] - b["PREV_CLOSE"]) / b["PREV_CLOSE"] * 100
+
+        # merge P/E
+        pe = load_per_date("pe_ratio")
+        if not pe.empty:
+            pecol = next((c for c in pe.columns if "P/E" in c.upper()), None)
+            if pecol:
+                p = pe.rename(columns={pe.columns[0]: "SYM"})[["SYM", pecol]].copy()
+                p["SYM"] = p["SYM"].astype(str).str.upper()
+                p["P/E"] = L.to_num(p[pecol])
+                b = b.merge(p[["SYM", "P/E"]], on="SYM", how="left")
+        if "P/E" not in b.columns:
+            b["P/E"] = float("nan")
+
+        # merge annualised volatility
+        vol = load_per_date("daily_volatility")
+        if not vol.empty:
+            vcol = next((c for c in vol.columns if "Annualised" in c), None)
+            scol = "Symbol" if "Symbol" in vol.columns else vol.columns[1]
+            if vcol:
+                v = vol[[scol, vcol]].copy()
+                v.columns = ["SYM", "Ann.Vol"]
+                v["SYM"] = v["SYM"].astype(str).str.upper()
+                v["Ann.Vol"] = L.to_num(v["Ann.Vol"])
+                b = b.merge(v, on="SYM", how="left")
+        if "Ann.Vol" not in b.columns:
+            b["Ann.Vol"] = float("nan")
+
+        # merge 52wk high -> % from high
+        w52 = load_per_date("week52_high_low")
+        if not w52.empty and "Adjusted_52_Week_High" in w52.columns:
+            w = w52.rename(columns={"SYMBOL": "SYM"})[["SYM", "Adjusted_52_Week_High"]].copy()
+            w["SYM"] = w["SYM"].astype(str).str.upper()
+            w["52wHigh"] = L.to_num(w["Adjusted_52_Week_High"])
+            b = b.merge(w[["SYM", "52wHigh"]], on="SYM", how="left")
+            b["%FromHigh"] = (b["CLOSE_PRICE"] - b["52wHigh"]) / b["52wHigh"] * 100
+        else:
+            b["52wHigh"] = float("nan"); b["%FromHigh"] = float("nan")
+
+        # filters
+        f1, f2, f3 = st.columns(3)
+        min_chg = f1.slider("Min % change", -15.0, 20.0, 0.0, 0.5, key="sc_chg")
+        min_del = f2.slider("Min delivery %", 0, 100, 0, 5, key="sc_del")
+        min_to = f3.slider("Min turnover (₹ lacs)", 0, 5000, 200, 100, key="sc_to")
+        f4, f5, f6 = st.columns(3)
+        max_pe = f4.number_input("Max P/E (0 = any)", 0.0, 500.0, 0.0, 5.0, key="sc_pe")
+        near_high = f5.checkbox("Within X% of 52wk high", key="sc_nh")
+        high_gap = f6.slider("X% from high", 0.0, 25.0, 5.0, 0.5, key="sc_gap", disabled=not near_high)
+
+        m = b[(b["%Chg"] >= min_chg) & (b["DELIV_PER"].fillna(0) >= min_del)
+              & (b["TURNOVER_LACS"].fillna(0) >= min_to)]
+        if max_pe > 0:
+            m = m[m["P/E"].notna() & (m["P/E"] <= max_pe)]
+        if near_high:
+            m = m[m["%FromHigh"] >= -high_gap]
+
+        st.markdown(T.stat_row([
+            T.stat_card("Matches", f"{len(m):,}", "stocks pass filters", "up" if len(m) else "neutral"),
+            T.stat_card("Avg % change", f'{m["%Chg"].mean():+.2f}%' if len(m) else "—", "of matches", "neutral"),
+            T.stat_card("Avg delivery", f'{m["DELIV_PER"].mean():.0f}%' if len(m) else "—", "conviction", "neutral"),
+        ]), unsafe_allow_html=True)
+
+        with card():
+            st.markdown("#### Scan results")
+            if m.empty:
+                _hint("No stocks match — loosen the filters.")
+            else:
+                keep = ["SYMBOL", "CLOSE_PRICE", "%Chg", "DELIV_PER", "TURNOVER_LACS",
+                        "P/E", "Ann.Vol", "%FromHigh"]
+                out = m[keep].sort_values("%Chg", ascending=False)
+                st.dataframe(
+                    out.style.background_gradient(subset=["%Chg"], cmap="RdYlGn")
+                       .background_gradient(subset=["DELIV_PER"], cmap="Greens")
+                       .format({"CLOSE_PRICE": "{:,.2f}", "%Chg": "{:+.2f}", "DELIV_PER": "{:.0f}",
+                                "TURNOVER_LACS": "{:,.0f}", "P/E": "{:.1f}", "Ann.Vol": "{:.2f}",
+                                "%FromHigh": "{:+.1f}"}, na_rep="-"),
+                    width="stretch", height=460, hide_index=True)
+                st.caption(f"Bhav copy date: {per_date_dates('bhavcopy_delivery')[-1]}")
+
+# ================================================================ Peer Compare
+if PAGE == "⚖️ Peer Compare":
+    st.caption("Side-by-side comparison — pick a few stocks to line up price move, "
+               "delivery, valuation, volatility and distance from 52wk high.")
+    picks = st.multiselect("Stocks to compare (2–6)", SYMBOLS, key="peer_pick",
+                           format_func=lambda s: f"{s} — {NAMES[s]}" if s in NAMES else s)
+    if len(picks) < 2:
+        st.info("Select at least two symbols to compare.")
+    else:
+        bhav = load_per_date("bhavcopy_delivery")
+        pe = load_per_date("pe_ratio")
+        vol = load_per_date("daily_volatility")
+        w52 = load_per_date("week52_high_low")
+        pecol = next((c for c in pe.columns if "P/E" in c.upper()), None) if not pe.empty else None
+        vcol = next((c for c in vol.columns if "Annualised" in c), None) if not vol.empty else None
+        vscol = ("Symbol" if "Symbol" in vol.columns else (vol.columns[1] if not vol.empty else None))
+
+        rows = []
+        for s in picks:
+            r = {"Symbol": s}
+            bb = bhav[bhav["SYMBOL"].astype(str).str.upper() == s] if not bhav.empty else pd.DataFrame()
+            if not bb.empty:
+                x = _num(bb, ["CLOSE_PRICE", "PREV_CLOSE", "DELIV_PER", "TURNOVER_LACS"]).iloc[0]
+                r["LTP"] = x["CLOSE_PRICE"]
+                r["%Chg"] = (x["CLOSE_PRICE"] - x["PREV_CLOSE"]) / x["PREV_CLOSE"] * 100
+                r["Delivery%"] = x["DELIV_PER"]
+                r["Turnover(L)"] = x["TURNOVER_LACS"]
+            if pecol:
+                pp = pe[pe.iloc[:, 0].astype(str).str.upper() == s]
+                if not pp.empty:
+                    r["P/E"] = L.to_num(pp[pecol]).iloc[0]
+            if vcol and vscol:
+                vv = vol[vol[vscol].astype(str).str.upper() == s]
+                if not vv.empty:
+                    r["Ann.Vol"] = L.to_num(vv[vcol]).iloc[0]
+            if not w52.empty and "Adjusted_52_Week_High" in w52.columns:
+                ww = w52[w52["SYMBOL"].astype(str).str.upper() == s]
+                if not ww.empty:
+                    hi = L.to_num(ww["Adjusted_52_Week_High"]).iloc[0]
+                    r["52wHigh"] = hi
+                    if r.get("LTP") and hi:
+                        r["%FromHigh"] = (r["LTP"] - hi) / hi * 100
+            rows.append(r)
+        comp = pd.DataFrame(rows).set_index("Symbol")
+
+        st.markdown(T.stat_row([
+            T.stat_card("Best today", comp["%Chg"].idxmax() if "%Chg" in comp else "—",
+                        f'{comp["%Chg"].max():+.2f}%' if "%Chg" in comp else "", "up", arrow=True),
+            T.stat_card("Weakest today", comp["%Chg"].idxmin() if "%Chg" in comp else "—",
+                        f'{comp["%Chg"].min():+.2f}%' if "%Chg" in comp else "", "down", arrow=True),
+            T.stat_card("Compared", f"{len(comp)}", "stocks", "neutral"),
+        ]), unsafe_allow_html=True)
+
+        with card():
+            st.markdown("#### Comparison table")
+            fmt = {c: "{:,.2f}" for c in ["LTP", "Turnover(L)", "52wHigh"] if c in comp.columns}
+            fmt.update({c: "{:+.2f}" for c in ["%Chg", "%FromHigh"] if c in comp.columns})
+            fmt.update({"Delivery%": "{:.0f}", "P/E": "{:.1f}", "Ann.Vol": "{:.2f}"})
+            grad = [c for c in ["%Chg", "Delivery%"] if c in comp.columns]
+            sty = comp.style.format({k: v for k, v in fmt.items() if k in comp.columns}, na_rep="-")
+            if grad:
+                sty = sty.background_gradient(subset=grad, cmap="RdYlGn")
+            st.dataframe(sty, width="stretch")
+        if "%Chg" in comp.columns:
+            with card():
+                st.markdown("#### Today's move (%)")
+                C.show(C.hbar(comp["%Chg"], _DARK, diverge=True))
+
+# ================================================================ F&O / Options
+if PAGE == "🧩 F&O / Options":
+    st.caption("Derivatives from the F&O bhav copy — open interest, OI buildup, "
+               "put/call ratio and a strike-wise option chain.")
+    fno = load_per_date("fno_bhavcopy")
+    if fno.empty:
+        _hint("F&O bhav copy not collected for the latest day yet.")
+    else:
+        f = _num(fno.copy(), ["StrkPric", "OpnIntrst", "ChngInOpnIntrst",
+                              "TtlTradgVol", "TtlTrfVal", "ClsPric", "UndrlygPric"])
+        f["SYM"] = f["TckrSymb"].astype(str).str.upper()
+        opts = f[f["OptnTp"].astype(str).str.upper().isin(["CE", "PE"])]
+        ce_oi = opts[opts["OptnTp"].str.upper() == "CE"]["OpnIntrst"].sum()
+        pe_oi = opts[opts["OptnTp"].str.upper() == "PE"]["OpnIntrst"].sum()
+        pcr = (pe_oi / ce_oi) if ce_oi else 0
+
+        st.markdown(T.stat_row([
+            T.stat_card("Underlyings", f'{f["SYM"].nunique():,}', "in F&O", "neutral"),
+            T.stat_card("Put/Call OI", f"{pcr:.2f}", "PCR (>1 = bearish hedging)",
+                        "down" if pcr > 1 else "up"),
+            T.stat_card("Total OI", f'{f["OpnIntrst"].sum():,.0f}', "open contracts", "neutral"),
+            T.stat_card("Contracts traded", f'{f["TtlTradgVol"].sum():,.0f}', "today's volume", "neutral"),
+        ]), unsafe_allow_html=True)
+
+        o1, o2 = st.columns(2)
+        with o1:
+            with card():
+                st.markdown("#### Most active underlyings — by OI")
+                by_oi = f.groupby("SYM")["OpnIntrst"].sum().nlargest(15)
+                C.show(C.hbar(by_oi, _DARK, color=T.INDIGO))
+        with o2:
+            with card():
+                st.markdown("#### OI buildup — biggest change")
+                chg = f.groupby("SYM")["ChngInOpnIntrst"].sum()
+                top = pd.concat([chg.nlargest(8), chg.nsmallest(8)]).sort_values()
+                C.show(C.hbar(top, _DARK, diverge=True))
+
+        with card():
+            st.markdown("#### Option chain")
+            usyms = sorted(opts["SYM"].dropna().unique())
+            if not usyms:
+                _hint("No option rows in the F&O bhav copy.")
+            else:
+                cc1, cc2 = st.columns([1, 1])
+                usel = cc1.selectbox("Underlying", usyms, key="fno_sym")
+                exps = sorted(opts[opts["SYM"] == usel]["XpryDt"].dropna().astype(str).unique())
+                esel = cc2.selectbox("Expiry", exps, key="fno_exp")
+                sub = opts[(opts["SYM"] == usel) & (opts["XpryDt"].astype(str) == esel)]
+                ce = (sub[sub["OptnTp"].str.upper() == "CE"]
+                      [["StrkPric", "OpnIntrst", "ChngInOpnIntrst", "ClsPric"]]
+                      .rename(columns={"OpnIntrst": "CE OI", "ChngInOpnIntrst": "CE ΔOI", "ClsPric": "CE LTP"}))
+                pe_ = (sub[sub["OptnTp"].str.upper() == "PE"]
+                       [["StrkPric", "OpnIntrst", "ChngInOpnIntrst", "ClsPric"]]
+                       .rename(columns={"OpnIntrst": "PE OI", "ChngInOpnIntrst": "PE ΔOI", "ClsPric": "PE LTP"}))
+                chain = ce.merge(pe_, on="StrkPric", how="outer").sort_values("StrkPric")
+                chain = chain[["CE OI", "CE ΔOI", "CE LTP", "StrkPric", "PE LTP", "PE ΔOI", "PE OI"]]
+                st.dataframe(
+                    chain.style.background_gradient(subset=["CE OI"], cmap="Reds")
+                         .background_gradient(subset=["PE OI"], cmap="Greens")
+                         .format({"StrkPric": "{:,.1f}", "CE OI": "{:,.0f}", "PE OI": "{:,.0f}",
+                                  "CE ΔOI": "{:+,.0f}", "PE ΔOI": "{:+,.0f}",
+                                  "CE LTP": "{:,.2f}", "PE LTP": "{:,.2f}"}, na_rep="-"),
+                    width="stretch", height=460, hide_index=True)
+                up = opts[opts["SYM"] == usel]["UndrlygPric"].dropna()
+                if not up.empty:
+                    st.caption(f"{usel} underlying ≈ {up.iloc[0]:,.2f} · expiry {esel}")
+
+# ================================================================ Settings
+if PAGE == "⚙️ Settings":
+    st.caption("Fetch and maintain the local data warehouse.")
+    sc1, sc2 = st.columns(2)
+    with sc1:
+        with card():
+            st.markdown("#### 🔄 NSE data")
+            if st.button("🔄 Reload data (clear cache)", key="reload_data", width="stretch"):
+                st.cache_data.clear()
+                st.rerun()
+            st.caption("Fetch latest — snapshots + today's reports")
+            if st.button("⬇️ Fetch latest (daily job)", key="fetch_daily", width="stretch"):
+                with st.spinner("Fetching from NSE…"):
+                    summ = _collector().run_daily()
+                st.success(f"Done — {summ.line()}")
+                st.cache_data.clear()
+            st.caption("Backfill past dates (per-date reports)")
+            _today = dt.date.today()
+            bf_from = st.date_input("From", value=_today - dt.timedelta(days=7), key="bf_from")
+            bf_to = st.date_input("To", value=_today, key="bf_to")
+            if st.button("⏪ Backfill range", key="bf_btn", width="stretch"):
+                if bf_from > bf_to:
+                    st.error("From date must be ≤ To date.")
+                else:
+                    with st.spinner(f"Backfilling {bf_from} → {bf_to}…"):
+                        summ = _collector().run_backfill(bf_from, bf_to)
+                    st.success(f"Done — {summ.line()}")
+                    st.cache_data.clear()
+            st.caption("Snapshots (gainers, breadth, option chain) are live-only "
+                       "and cannot be backfilled.")
+    with sc2:
+        with card():
+            st.markdown("#### 🅱️ BSE data")
+            st.caption("BSE EOD bhav copy (~4800 scrips) from bseindia.com.")
+            if st.button("⬇️ Fetch latest BSE", key="bse_daily", width="stretch"):
+                with st.spinner("Fetching BSE bhav copy…"):
+                    summ = _bse_collector().run_daily()
+                st.success(f"Done — {summ.line()}")
+                st.cache_data.clear()
+            bse_from = st.date_input("From", value=dt.date.today() - dt.timedelta(days=7), key="bse_from")
+            bse_to = st.date_input("To", value=dt.date.today(), key="bse_to")
+            if st.button("⏪ Backfill BSE range", key="bse_bf", width="stretch"):
+                if bse_from > bse_to:
+                    st.error("From date must be ≤ To date.")
+                else:
+                    with st.spinner(f"Backfilling BSE {bse_from} → {bse_to}…"):
+                        summ = _bse_collector().run_backfill(bse_from, bse_to)
+                    st.success(f"Done — {summ.line()}")
+                    st.cache_data.clear()
+
+# ---------------------------------------------------------------- footer
+st.markdown(T.footer(asof), unsafe_allow_html=True)

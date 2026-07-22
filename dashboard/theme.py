@@ -4,12 +4,12 @@ indigo + coral palette, Inter type. Mirrors the reference SaaS layout.
 
 from __future__ import annotations
 
-# palette
-INDIGO = "#6C63FF"
-INDIGO_DK = "#4B45C6"
-CORAL = "#F2724B"
-GREEN = "#22B07D"
-RED = "#EF5B5B"
+# palette — Fillow purple accent + semantic green/red, drives all charts
+INDIGO = "#886CC0"
+INDIGO_DK = "#6C4FA8"
+CORAL = "#FC2E53"
+GREEN = "#09BD3C"
+RED = "#FC2E53"
 BG = "#EEF1FB"
 CARD = "#FFFFFF"
 INK = "#2B2D42"
@@ -21,17 +21,26 @@ DOWN = CORAL
 
 CSS = f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
 
-html, body, [class*="css"], .stApp {{
-    font-family: 'Inter', -apple-system, Segoe UI, sans-serif;
+html, body, [class*="css"], .stApp, button, input, textarea, select {{
+    font-family: 'Poppins', -apple-system, Segoe UI, sans-serif !important;
+}}
+h1,h2,h3,h4,h5,h6, p, label, li, a,
+.stMarkdown, .stMarkdown *, [data-testid="stMarkdownContainer"],
+[data-testid="stMetricValue"], [data-testid="stMetricLabel"],
+[data-testid="stDataFrame"], [data-testid="stDataFrame"] *,
+.stat-value, .stat-title, .stat-sub, .hero, .hero *, .topbar, .topbar *,
+.badge, .sect, .sect *, .brand, .brand * {{
+    font-family: 'Poppins', -apple-system, Segoe UI, sans-serif !important;
 }}
 .stApp {{ background: {BG}; }}
 
 /* hide ONLY Deploy/menu/decoration/footer. Keep the header + native sidebar
    toggle fully intact so open/close always works. */
 [data-testid="stHelp"] {{ display: none !important; }}
-[data-testid="stToolbar"] {{ display: none !important; }}
+/* hide Deploy + hamburger only — keep toolbar so the expand-sidebar button survives */
+[data-testid="stToolbarActions"], [data-testid="stAppDeployButton"], #MainMenu {{ display: none !important; }}
 [data-testid="stDecoration"] {{ display: none !important; }}
 footer {{ visibility: hidden !important; }}
 header[data-testid="stHeader"] {{ background: transparent; }}
@@ -44,14 +53,15 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 .block-container {{ padding-top: 1.4rem; padding-bottom: 3rem; max-width: 1500px; }}
 
 /* headings */
-h1, h2, h3 {{ color: {INK}; font-weight: 700; letter-spacing: -0.01em; }}
+h1, h2, h3, h4, h5 {{ color: {INK} !important; font-weight: 700; letter-spacing: -0.01em; }}
 h2 {{ font-size: 1.15rem !important; }}
 h3 {{ font-size: 1rem !important; color: {INK}; }}
 .stCaption, [data-testid="stCaptionContainer"] {{ color: {MUTED}; }}
 
-/* bordered containers -> cards */
+/* bordered containers -> cards. !important beats Streamlit's own native theme
+   background (still set in .streamlit/config.toml) which otherwise wins the fight. */
 [data-testid="stVerticalBlockBorderWrapper"] {{
-    background: {CARD};
+    background: {CARD} !important;
     border: 1px solid rgba(108,99,255,0.08) !important;
     border-radius: 18px;
     box-shadow: 0 8px 26px rgba(60,64,120,0.07);
@@ -60,13 +70,13 @@ h3 {{ font-size: 1rem !important; color: {INK}; }}
 
 /* native metric -> soft card */
 [data-testid="stMetric"] {{
-    background: {CARD};
+    background: {CARD} !important;
     border-radius: 16px;
     padding: 14px 18px;
     box-shadow: 0 6px 20px rgba(60,64,120,0.06);
 }}
-[data-testid="stMetricValue"] {{ font-size: 1.7rem; font-weight: 700; color: {INK}; }}
-[data-testid="stMetricLabel"] {{ color: {MUTED}; font-weight: 600; }}
+[data-testid="stMetricValue"] {{ font-size: 1.7rem; font-weight: 700; color: {INK} !important; }}
+[data-testid="stMetricLabel"] {{ color: {MUTED} !important; font-weight: 600; }}
 
 /* sidebar -> indigo rail */
 [data-testid="stSidebar"] {{
@@ -139,7 +149,19 @@ h3 {{ font-size: 1rem !important; color: {INK}; }}
 [data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:has(input:checked) {{
     background:rgba(255,255,255,0.22);
 }}
-[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label > div:first-child {{ display:none; }}
+/* Fillow metismenu — animated primary pill bar on active nav item */
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label {{
+    position:relative; overflow:hidden; transition:all 0.5s;
+}}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:before {{
+    content:""; position:absolute; left:0; top:0; height:100%; width:0;
+    background:{INDIGO}; border-top-right-radius:3.563rem; border-bottom-right-radius:3.563rem;
+    transition:all 0.5s;
+}}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:has(input:checked):before {{
+    width:0.3rem;
+}}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label div:has(> [data-testid="stMarkdownContainer"]) > *:first-child {{ display:none; }}
 
 /* pill badge */
 .badge {{ display:inline-block; padding:5px 14px; border-radius:999px;
@@ -237,90 +259,527 @@ POLISH = f"""
 /* inputs focus ring */
 .stTextInput input:focus, .stTextArea textarea:focus, .stDateInput input:focus {{
   border-color:{INDIGO} !important; box-shadow:0 0 0 3px rgba(108,99,255,0.15) !important; }}
+
+/* stat card -> .card-body layout (padding lives on the body now) */
+.stat-card {{ padding:0 !important; overflow:hidden; }}
+.stat-card .card-body {{ padding:1.5rem !important; display:flex; flex-direction:column; gap:3px; }}
+.stat-card.mini .card-body {{ padding:1.1rem 1.25rem !important; }}
+
+/* sector heatmap tiles */
+.hm-grid {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(110px,1fr));
+  gap:8px; }}
+.hm-tile {{ border-radius:10px; padding:10px 12px; }}
+.hm-l {{ font-size:0.72rem; font-weight:600; opacity:0.85; text-transform:uppercase;
+  letter-spacing:0.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+.hm-v {{ font-size:1.05rem; font-weight:800; margin-top:2px; }}
+
+/* Fillow-style HTML tables (roomy) — used by T.table(); theme-safe via inherit */
+.dash-table {{ overflow-x:auto; border-radius:12px; }}
+.table {{ width:100%; border-collapse:separate; border-spacing:0; font-size:0.9rem; color:inherit; }}
+.table th, .table td {{ padding:0.85rem 0.9rem; vertical-align:middle;
+  border-bottom:1px solid rgba(140,140,150,0.16); white-space:nowrap; }}
+.table thead th {{ text-transform:capitalize; font-weight:600; letter-spacing:0.02em;
+  color:inherit; border-bottom:1px solid rgba(140,140,150,0.28); }}
+.table tbody tr {{ transition:background .15s ease; }}
+.table tbody tr:hover td {{ background:rgba(136,108,192,0.08); }}
+.table tbody tr:last-child td {{ border-bottom:none; }}
+.table td:last-child, .table th:last-child {{ text-align:right; }}
+
+/* Fillow progress bars */
+[data-testid="stMarkdownContainer"]:has(> .progress),
+[data-testid="stMarkdownContainer"]:has(> .pg-label) {{ margin:0.75rem 0 1rem !important; display:block; }}
+.progress {{ height:8px; background:rgba(140,140,150,0.16); border-radius:999px;
+  overflow:hidden; margin:6px 0 2px; }}
+.progress-bar {{ height:100%; border-radius:999px; background:{INDIGO}; animation:pggrow 1s ease; }}
+.progress-bar.success {{ background:{GREEN}; }}
+.progress-bar.danger {{ background:{CORAL}; }}
+.progress-bar.warning {{ background:#FFC107; }}
+.progress-bar.primary {{ background:{INDIGO}; }}
+.pg-label {{ font-size:.75rem; color:{MUTED}; margin-bottom:2px;
+  display:flex; justify-content:space-between; font-weight:600; }}
+@keyframes pggrow {{ from {{ width:0; }} }}
+
+/* consistent vertical rhythm for every custom HTML block, on every page */
+[data-testid="stMarkdownContainer"]:has(> .hero),
+[data-testid="stMarkdownContainer"]:has(> .stat-row),
+[data-testid="stMarkdownContainer"]:has(> .sect),
+[data-testid="stMarkdownContainer"]:has(> .app-footer),
+[data-testid="stMarkdownContainer"]:has(> .dash-table) {{ margin:0.75rem 0 1rem !important; }}
+[data-testid="stMarkdownContainer"]:has(> .badge) {{ margin:0.5rem 0 !important; }}
+
+/* app footer */
+.app-footer {{ display:flex; align-items:center; justify-content:space-between; gap:16px;
+  flex-wrap:wrap; margin-top:40px; padding:18px 22px; border-radius:14px;
+  border:1px solid rgba(108,99,255,0.10); background:{CARD};
+  font-size:0.8rem; color:{MUTED}; }}
+.app-footer b {{ color:inherit; }}
+.app-footer .af-mid {{ opacity:0.85; }}
+.app-footer .af-right {{ font-weight:600; }}
 </style>
 """
 
 
 # ==================== AURORA THEME (premium dark fintech) ===================
-# dark canvas, teal + gold accents, glowing key numbers. Retail-friendly but
-# high perceived value. Additive override applied on top of modern base.
+# institutional trading-desk look: near-black navy canvas, glassmorphism cards,
+# blue accent, fintech green/red. Additive override applied on top of the base.
 AURORA = """
 <style>
 :root {
-  --a-bg:#0E1117; --a-card:#1A1F2E; --a-line:#2A3142; --a-ink:#E6E9F0;
-  --a-muted:#8A93A6; --a-teal:#00E0B8; --a-gold:#F5C451; --a-red:#FF5C7A; --a-indigo:#7C83FF;
+  --a-bg:#070B14; --a-bg2:#0F172A; --a-card:rgba(15,23,42,0.88); --a-card-solid:#101827;
+  --a-line:rgba(255,255,255,0.08); --a-line2:rgba(255,255,255,0.14);
+  --a-ink:#FFFFFF; --a-muted:#94A3B8;
+  --a-pos:#00C853; --a-neg:#FF3B30; --a-accent:#3B82F6; --a-warn:#FFC107;
 }
-.stApp { background:var(--a-bg) !important; color:var(--a-ink) !important; }
-h1,h2,h3,h4,h5 { color:var(--a-ink) !important; }
+
+/* canvas — one faint top glow; avoids banding on wide monitors */
+.stApp {
+  background:
+    radial-gradient(1100px 520px at 50% -12%, rgba(59,130,246,0.06), transparent 62%),
+    var(--a-bg) !important;
+  color:var(--a-ink) !important;
+}
+h1,h2,h3,h4,h5 { color:var(--a-ink) !important; letter-spacing:-0.01em; }
 .stMarkdown, .stMarkdown p, label, .stCaption, [data-testid="stCaptionContainer"] { color:var(--a-muted) !important; }
 
-/* cards */
-[data-testid="stVerticalBlockBorderWrapper"] {
-  background:var(--a-card) !important; border:1px solid var(--a-line) !important;
-  border-radius:16px !important; box-shadow:0 8px 30px rgba(0,0,0,0.35) !important; }
-[data-testid="stVerticalBlockBorderWrapper"]:hover { border-color:rgba(0,224,184,0.35) !important; }
-[data-testid="stVerticalBlockBorderWrapper"] h4 { border-left-color:var(--a-teal) !important; }
+/* subtle fade-in for content surfaces */
+@keyframes a-fade { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
 
-/* metrics + stat cards + glow */
-[data-testid="stMetric"], .stat-card { background:var(--a-card) !important; border:1px solid var(--a-line) !important;
-  box-shadow:0 8px 24px rgba(0,0,0,0.35) !important; }
+/* data panels — flat and calm; inset top-highlight fakes elevation, no blur/motion */
+[data-testid="stVerticalBlockBorderWrapper"] {
+  background:rgba(15,23,42,0.70) !important; border:1px solid rgba(255,255,255,0.06) !important;
+  border-radius:18px !important; padding:24px !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.30) !important;
+  transition:border-color .2s ease;
+  animation:a-fade .35s ease both;
+}
+[data-testid="stVerticalBlockBorderWrapper"]:hover { border-color:rgba(255,255,255,0.12) !important; }
+[data-testid="stVerticalBlockBorderWrapper"] h4 {
+  border-left:none !important; padding:0 0 12px 0 !important; margin:0 0 16px 0 !important;
+  border-bottom:1px solid var(--a-line) !important;
+  font-size:1.05rem !important; font-weight:600 !important; }
+
+/* KPI cards — the only elevated surface; crisp numbers, no glow, no stripe */
+[data-testid="stMetric"], .stat-card {
+  background:var(--a-card) !important; border:1px solid var(--a-line) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.05), 0 8px 24px rgba(0,0,0,0.35) !important;
+  animation:a-fade .35s ease both; }
+.stat-card { transition:border-color .2s ease; }
+.stat-card:hover { border-color:var(--a-line2) !important; }
+.stat-card::before { display:none !important; }
 .stat-title { color:var(--a-muted) !important; }
-.stat-value { color:var(--a-ink) !important; }
-.stat-value.up { color:var(--a-teal) !important; text-shadow:0 0 18px rgba(0,224,184,0.45); }
-.stat-value.down { color:var(--a-red) !important; text-shadow:0 0 18px rgba(255,92,122,0.35); }
-.stat-value.neutral { color:var(--a-gold) !important; text-shadow:0 0 18px rgba(245,196,81,0.30); }
-.stat-card::before { background:var(--a-teal) !important; }
-.stat-card:has(.up)::before { background:var(--a-teal) !important; }
-.stat-card:has(.down)::before { background:var(--a-red) !important; }
-.stat-card:has(.neutral)::before { background:var(--a-gold) !important; }
-[data-testid="stMetricValue"] { color:var(--a-ink) !important; }
+.stat-value { color:var(--a-ink) !important; font-variant-numeric:tabular-nums; text-shadow:none !important; }
+.stat-value.up { color:var(--a-pos) !important; }
+.stat-value.down { color:var(--a-neg) !important; }
+.stat-value.neutral { color:var(--a-accent) !important; }
+.stat-sub { color:var(--a-muted) !important; }
+[data-testid="stMetricValue"] { color:var(--a-ink) !important; font-variant-numeric:tabular-nums; }
+[data-testid="stMetricLabel"] { color:var(--a-muted) !important; }
 
 /* hero */
-.hero { background:linear-gradient(120deg,#12303A 0%, #14203A 55%, #0E1117 100%) !important;
-  border:1px solid var(--a-line) !important; box-shadow:0 12px 40px rgba(0,224,184,0.10) !important; }
+.hero { background:linear-gradient(120deg, #0E1B33 0%, #0B1424 55%, #070B14 100%) !important;
+  border:1px solid var(--a-line) !important; border-radius:20px !important;
+  box-shadow:0 18px 48px rgba(0,0,0,0.5), 0 0 0 1px rgba(59,130,246,0.10) !important; }
 .hero h1 { color:#fff !important; } .hero .sub { color:var(--a-muted) !important; }
-.hero::after { background:radial-gradient(circle, rgba(0,224,184,0.20), transparent 70%) !important; }
+.hero::after { background:radial-gradient(circle, rgba(59,130,246,0.22), transparent 70%) !important; }
 
-/* topbar */
-.topbar { background:var(--a-card) !important; border:1px solid var(--a-line) !important; }
+/* sticky frosted topbar */
+.topbar { position:sticky; top:8px; z-index:20;
+  background:rgba(15,23,42,0.72) !important; border:1px solid var(--a-line) !important;
+  border-radius:16px !important; -webkit-backdrop-filter:blur(18px); backdrop-filter:blur(18px);
+  box-shadow:0 12px 34px rgba(0,0,0,0.45) !important; }
 .topbar .tb-name, .topbar .tb-v { color:var(--a-ink) !important; }
-.topbar .tb-logo { background:linear-gradient(135deg,var(--a-teal),#0AA88C) !important; color:#04201B !important; }
+.topbar .tb-logo { background:linear-gradient(135deg,var(--a-accent),#1D4ED8) !important; color:#fff !important;
+  box-shadow:0 4px 14px rgba(59,130,246,0.45) !important; }
 .topbar .tb-k, .topbar .tb-tag { color:var(--a-muted) !important; }
-.topbar .tb-v.up { color:var(--a-teal) !important; } .topbar .tb-v.down { color:var(--a-red) !important; }
+.topbar .tb-v { font-variant-numeric:tabular-nums; }
+.topbar .tb-v.up { color:var(--a-pos) !important; } .topbar .tb-v.down { color:var(--a-neg) !important; }
 
-/* sidebar */
-[data-testid="stSidebar"] { background:#12151F !important; border-right:1px solid var(--a-line); }
+/* sidebar rail */
+[data-testid="stSidebar"] { background:linear-gradient(180deg,#0B1220 0%, #070B14 100%) !important;
+  border-right:1px solid var(--a-line); }
 [data-testid="stSidebar"] * { color:var(--a-ink) !important; }
-.brand .logo { background:linear-gradient(135deg,var(--a-teal),#0AA88C) !important; color:#04201B !important; }
+.brand .logo { background:linear-gradient(135deg,var(--a-accent),#1D4ED8) !important; color:#fff !important;
+  box-shadow:0 4px 14px rgba(59,130,246,0.40); }
 .brand .tg, [data-testid="stSidebar"] .stCaption { color:var(--a-muted) !important; }
-[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover { background:rgba(255,255,255,0.05) !important; }
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label {
+  border-radius:11px; transition:background .18s ease, box-shadow .18s ease; }
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover { background:rgba(255,255,255,0.06) !important; }
 [data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:has(input:checked) {
-  background:rgba(0,224,184,0.14) !important; box-shadow:inset 3px 0 0 var(--a-teal) !important; }
-[data-testid="stSidebar"] [data-testid="stMetric"] { background:rgba(0,224,184,0.10) !important; }
+  background:rgba(59,130,246,0.16) !important; box-shadow:inset 3px 0 0 var(--a-accent), 0 0 24px rgba(59,130,246,0.12) !important; }
+[data-testid="stSidebar"] [data-testid="stMetric"] { background:rgba(59,130,246,0.10) !important; border:1px solid var(--a-line) !important; }
 
-/* buttons */
-.stButton>button { background:linear-gradient(135deg,var(--a-teal),#0AA88C) !important; color:#04201B !important;
-  border:none !important; box-shadow:0 6px 18px rgba(0,224,184,0.30) !important; font-weight:700; }
+/* buttons — solid accent, quiet hover, no lift */
+.stButton>button { background:var(--a-accent) !important; color:#fff !important;
+  border:1px solid rgba(255,255,255,0.10) !important; border-radius:10px !important; font-weight:600;
+  box-shadow:0 1px 2px rgba(0,0,0,0.30) !important; transition:filter .15s ease, background .15s ease; }
+.stButton>button:hover { background:#2563EB !important; filter:brightness(1.05); }
+.stButton>button:active { filter:brightness(0.95); }
+
+/* inputs — glass with focus glow */
+.stTextInput input, .stTextArea textarea, .stDateInput input,
+.stSelectbox div[data-baseweb="select"] > div { background:rgba(9,14,26,0.9) !important; color:var(--a-ink) !important;
+  border:1px solid var(--a-line) !important; border-radius:12px !important; }
+.stTextInput input::placeholder, .stTextArea textarea::placeholder { color:#5B657A !important; }
+.stTextInput input:focus, .stTextArea textarea:focus, .stDateInput input:focus {
+  border-color:var(--a-accent) !important; box-shadow:0 0 0 3px rgba(59,130,246,0.22) !important; }
+
+/* pill tabs */
+.stTabs [data-baseweb="tab"] { background:var(--a-card-solid) !important; color:var(--a-muted) !important;
+  border:1px solid var(--a-line) !important; box-shadow:none !important; }
+.stTabs [aria-selected="true"] { background:var(--a-accent) !important; color:#fff !important; border-color:transparent !important; }
+
+/* tables */
+[data-testid="stDataFrame"] { border:1px solid var(--a-line) !important; border-radius:14px !important;
+  box-shadow:0 14px 34px rgba(0,0,0,0.42) !important; }
+[data-testid="stDataFrame"] thead tr th { background:#0B1220 !important; color:var(--a-ink) !important; }
+
+/* callouts */
+[data-testid="stAlert"] { background:rgba(15,23,42,0.85) !important; color:var(--a-ink) !important;
+  border:1px solid var(--a-line) !important; border-radius:14px !important;
+  -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); }
+
+/* badges */
+.badge.up { background:rgba(0,200,83,0.16) !important; color:var(--a-pos) !important; }
+.badge.down { background:rgba(255,59,48,0.16) !important; color:var(--a-neg) !important; }
+.badge.neutral { background:rgba(59,130,246,0.16) !important; color:var(--a-accent) !important; }
+
+/* footer */
+.app-footer { background:var(--a-card) !important; border:1px solid var(--a-line) !important; color:var(--a-muted) !important; }
+
+/* section title */
+.sect .t { color:var(--a-ink) !important; } .sect .s { color:var(--a-muted) !important; }
+
+/* scrollbar */
+::-webkit-scrollbar-thumb { background:rgba(59,130,246,0.35) !important; border-radius:10px; }
+::-webkit-scrollbar-thumb:hover { background:rgba(59,130,246,0.55) !important; }
+
+/* ---- premium refinement: 8px rhythm, type scale, hierarchy ---- */
+.block-container { padding-top:24px !important; padding-bottom:48px !important; }
+[data-testid="stHorizontalBlock"] { gap:24px !important; }
+.stat-row { gap:16px !important; margin:8px 0 16px !important; }
+
+h1 { font-weight:800 !important; }
+h2 { font-size:1.2rem !important; font-weight:700 !important; margin-bottom:8px !important; }
+[data-testid="stVerticalBlockBorderWrapper"] h4 {
+  font-size:0.98rem !important; font-weight:700 !important; letter-spacing:0 !important;
+  color:var(--a-ink) !important; margin:0 0 16px !important; }
+
+/* big market values */
+.stat-value { font-weight:800 !important; letter-spacing:-0.02em !important; line-height:1.1 !important; }
+.stat-title { font-size:0.7rem !important; font-weight:600 !important; letter-spacing:0.08em !important; }
+.stat-sub { margin-top:6px !important; line-height:1.3 !important; }
+[data-testid="stMetricValue"] { font-weight:800 !important; letter-spacing:-0.02em !important; }
+
+/* softened accent — thin gradient fade, not a solid slab */
+.stat-card::before { width:3px !important;
+  background:linear-gradient(180deg, var(--a-accent), transparent 85%) !important; }
+.stat-card:has(.up)::before { background:linear-gradient(180deg, var(--a-pos), transparent 85%) !important; }
+.stat-card:has(.down)::before { background:linear-gradient(180deg, var(--a-neg), transparent 85%) !important; }
+.stat-card:has(.neutral)::before { background:linear-gradient(180deg, var(--a-accent), transparent 85%) !important; }
+
+/* hairline dividers + calmer captions */
+hr, [data-testid="stMarkdown"] hr { border:none !important; border-top:1px solid var(--a-line) !important; margin:16px 0 !important; }
+.stCaption, [data-testid="stCaptionContainer"] { line-height:1.45 !important; }
+
+/* soften hero glow */
+.hero::after { opacity:0.75; }
+
+/* sidebar toggle — visible on dark canvas */
+[data-testid="stSidebarCollapseButton"] button svg,
+[data-testid="stSidebarCollapseButton"] svg { color:#FFFFFF !important; fill:#FFFFFF !important; }
+[data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {
+  background:rgba(15,23,42,0.72) !important; border:1px solid var(--a-line) !important;
+  border-radius:10px !important; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
+  box-shadow:0 8px 22px rgba(0,0,0,0.45) !important; }
+[data-testid="stSidebarCollapsedControl"] button svg, [data-testid="stSidebarCollapsedControl"] svg,
+[data-testid="collapsedControl"] button svg, [data-testid="collapsedControl"] svg {
+  color:var(--a-accent) !important; fill:var(--a-accent) !important; }
+</style>
+"""
+
+
+# ==================== STOCKSCANS THEME (light SaaS fintech) ==================
+# modeled on stockscans.in — Untitled-UI tokens: gray-50 canvas, white cards,
+# 1px #EAECF0 borders, blue accent, semantic green/red, 8px radius, Inter.
+STOCKSCANS = """
+<style>
+:root {
+  --s-bg:#F9FAFB; --s-card:#FFFFFF; --s-panel:#F2F4F7;
+  --s-line:#EAECF0; --s-line2:#D0D5DD;
+  --s-ink:#101828; --s-ink2:#344054; --s-muted:#475467; --s-muted2:#667085; --s-faint:#98A2B3;
+  --s-accent:#286CD2; --s-accent-dk:#175CD3; --s-accent-bg:#EFF8FF;
+  --s-pos:#039855; --s-pos-bg:#ECFDF3; --s-neg:#D92D20; --s-neg-bg:#FEF3F2;
+  --s-warn:#DC6803; --s-warn-bg:#FFFAEB;
+}
+
+/* canvas + type */
+.stApp { background:var(--s-bg) !important; color:var(--s-ink) !important; }
+h1,h2,h3,h4,h5 { color:var(--s-ink) !important; letter-spacing:-0.01em; }
+.stMarkdown, .stMarkdown p { color:var(--s-ink2) !important; }
+label, .stCaption, [data-testid="stCaptionContainer"] { color:var(--s-muted2) !important; }
+@keyframes s-fade { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+
+/* cards — white, hairline border, whisper shadow, no blur */
+[data-testid="stVerticalBlockBorderWrapper"] {
+  background:var(--s-card) !important; border:1px solid var(--s-line) !important;
+  border-radius:12px !important; padding:24px !important;
+  box-shadow:0 1px 2px rgba(16,24,40,0.05) !important;
+  transition:border-color .2s ease, box-shadow .2s ease; animation:s-fade .35s ease both; }
+[data-testid="stVerticalBlockBorderWrapper"]:hover {
+  border-color:var(--s-line2) !important; box-shadow:0 4px 12px rgba(16,24,40,0.08) !important; }
+[data-testid="stVerticalBlockBorderWrapper"] h4 {
+  color:var(--s-ink) !important; border-left:none !important;
+  padding:0 0 12px 0 !important; margin:0 0 16px 0 !important;
+  border-bottom:1px solid var(--s-line) !important;
+  font-size:1.05rem !important; font-weight:600 !important; }
+
+/* KPI cards */
+[data-testid="stMetric"], .stat-card {
+  background:var(--s-card) !important; border:1px solid var(--s-line) !important;
+  box-shadow:0 1px 2px rgba(16,24,40,0.05) !important; animation:s-fade .35s ease both; }
+.stat-card { transition:border-color .2s ease, box-shadow .2s ease; }
+.stat-card:hover { border-color:var(--s-line2) !important; box-shadow:0 4px 12px rgba(16,24,40,0.08) !important; }
+.stat-card::before { display:none !important; }
+.stat-title { color:var(--s-muted2) !important; }
+.stat-value { color:var(--s-ink) !important; text-shadow:none !important; font-variant-numeric:tabular-nums; }
+.stat-value.up { color:var(--s-pos) !important; }
+.stat-value.down { color:var(--s-neg) !important; }
+.stat-value.neutral { color:var(--s-accent) !important; }
+.stat-sub { color:var(--s-muted2) !important; }
+[data-testid="stMetricValue"] { color:var(--s-ink) !important; font-variant-numeric:tabular-nums; }
+[data-testid="stMetricLabel"] { color:var(--s-muted2) !important; }
+
+/* hero — clean light header panel, no billboard gradient */
+.hero { background:var(--s-card) !important; border:1px solid var(--s-line) !important;
+  border-radius:12px !important; box-shadow:0 1px 2px rgba(16,24,40,0.05) !important; }
+.hero h1 { color:var(--s-ink) !important; } .hero .sub { color:var(--s-muted) !important; }
+.hero::after { background:radial-gradient(circle, rgba(40,108,210,0.10), transparent 70%) !important; opacity:1; }
+
+/* sticky topbar — white, subtle border */
+.topbar { position:sticky; top:8px; z-index:20;
+  background:rgba(255,255,255,0.85) !important; border:1px solid var(--s-line) !important;
+  border-radius:12px !important; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
+  box-shadow:0 1px 2px rgba(16,24,40,0.05) !important; }
+.topbar .tb-name, .topbar .tb-v { color:var(--s-ink) !important; }
+.topbar .tb-logo { background:var(--s-accent) !important; color:#fff !important; box-shadow:none !important; }
+.topbar .tb-k, .topbar .tb-tag { color:var(--s-muted2) !important; }
+.topbar .tb-v { font-variant-numeric:tabular-nums; }
+.topbar .tb-v.up { color:var(--s-pos) !important; } .topbar .tb-v.down { color:var(--s-neg) !important; }
+
+/* sidebar — white rail, dark text (override base indigo) */
+[data-testid="stSidebar"] { background:var(--s-card) !important; border-right:1px solid var(--s-line) !important; }
+[data-testid="stSidebar"] * { color:var(--s-ink2) !important; }
+[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3 { color:var(--s-ink) !important; }
+.brand .logo { background:var(--s-accent) !important; color:#fff !important; box-shadow:none !important; }
+.brand .nm { color:var(--s-ink) !important; } .brand .tg, [data-testid="stSidebar"] .stCaption { color:var(--s-muted2) !important; }
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label {
+  color:var(--s-ink2) !important; border-radius:8px; transition:background .15s ease; }
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover { background:var(--s-panel) !important; }
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:has(input:checked) {
+  background:var(--s-accent-bg) !important; color:var(--s-accent-dk) !important;
+  box-shadow:inset 3px 0 0 var(--s-accent) !important; }
+[data-testid="stSidebar"] [data-testid="stMetric"] { background:var(--s-panel) !important; border:1px solid var(--s-line) !important; }
+[data-testid="stSidebar"] .stButton>button { background:var(--s-accent) !important; color:#fff !important; border:none; }
+
+/* buttons — solid accent, quiet hover */
+.stButton>button { background:var(--s-accent) !important; color:#fff !important;
+  border:1px solid var(--s-accent-dk) !important; border-radius:8px !important; font-weight:600;
+  box-shadow:0 1px 2px rgba(16,24,40,0.06) !important; transition:background .15s ease; }
+.stButton>button:hover { background:var(--s-accent-dk) !important; }
+
+/* inputs — white with focus ring */
+.stTextInput input, .stTextArea textarea, .stDateInput input,
+.stSelectbox div[data-baseweb="select"] > div { background:var(--s-card) !important; color:var(--s-ink) !important;
+  border:1px solid var(--s-line2) !important; border-radius:8px !important; }
+.stTextInput input::placeholder, .stTextArea textarea::placeholder { color:var(--s-faint) !important; }
+.stTextInput input:focus, .stTextArea textarea:focus, .stDateInput input:focus {
+  border-color:var(--s-accent) !important; box-shadow:0 0 0 4px rgba(40,108,210,0.15) !important; }
+
+/* pill tabs */
+.stTabs [data-baseweb="tab"] { background:var(--s-card) !important; color:var(--s-muted) !important;
+  border:1px solid var(--s-line) !important; box-shadow:none !important; }
+.stTabs [aria-selected="true"] { background:var(--s-accent) !important; color:#fff !important; border-color:transparent !important; }
+
+/* tables */
+[data-testid="stDataFrame"] { border:1px solid var(--s-line) !important; border-radius:10px !important;
+  box-shadow:0 1px 2px rgba(16,24,40,0.05) !important; }
+[data-testid="stDataFrame"] thead tr th { background:var(--s-bg) !important; color:var(--s-ink2) !important; }
+
+/* callouts */
+[data-testid="stAlert"] { background:var(--s-accent-bg) !important; color:var(--s-ink2) !important;
+  border:1px solid var(--s-line) !important; border-radius:10px !important; }
+
+/* badges */
+.badge.up { background:var(--s-pos-bg) !important; color:var(--s-pos) !important; }
+.badge.down { background:var(--s-neg-bg) !important; color:var(--s-neg) !important; }
+.badge.neutral { background:var(--s-accent-bg) !important; color:var(--s-accent) !important; }
+
+/* section title + dividers */
+.sect .t { color:var(--s-ink) !important; } .sect .s { color:var(--s-muted2) !important; }
+hr, [data-testid="stMarkdown"] hr { border-top:1px solid var(--s-line) !important; }
+
+/* footer */
+.app-footer { background:var(--s-card) !important; border:1px solid var(--s-line) !important; color:var(--s-muted2) !important; }
+
+/* scrollbar */
+::-webkit-scrollbar-thumb { background:var(--s-line2) !important; border-radius:10px; }
+::-webkit-scrollbar-thumb:hover { background:var(--s-faint) !important; }
+
+/* sidebar toggle — visible on light canvas */
+[data-testid="stSidebarCollapseButton"] button svg,
+[data-testid="stSidebarCollapseButton"] svg { color:var(--s-ink2) !important; fill:var(--s-ink2) !important; }
+[data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {
+  background:var(--s-card) !important; border:1px solid var(--s-line) !important;
+  border-radius:10px !important; box-shadow:0 4px 12px rgba(16,24,40,0.12) !important; }
+[data-testid="stSidebarCollapsedControl"] button svg, [data-testid="stSidebarCollapsedControl"] svg,
+[data-testid="collapsedControl"] button svg, [data-testid="collapsedControl"] svg {
+  color:var(--s-accent) !important; fill:var(--s-accent) !important; }
+</style>
+"""
+
+
+# ==================== FILLOW THEME (Fillow Saas admin — dark) ================
+# modeled on fillow.vercel.app/index-2.html — charcoal #161717 canvas,
+# #202020 cards, muted purple accent #886CC0, Poppins, ~9px radius, pill buttons.
+FILLOW = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+:root {
+  --f-bg:#161717; --f-card:#202020; --f-panel:#262626;
+  --f-line:#2B2B2B; --f-line2:#3A3A3A;
+  --f-ink:#FFFFFF; --f-body:#B3B3B3; --f-muted:#828690; --f-faint:#6B6E77;
+  --f-accent:#886CC0; --f-accent-dk:#6C4FA8; --f-accent-bg:rgba(136,108,192,0.12);
+  --f-pos:#09BD3C; --f-pos-bg:rgba(9,189,60,0.12); --f-neg:#FC2E53; --f-neg-bg:rgba(252,46,83,0.12);
+  --f-warn:#FF9F0A; --f-warn-bg:rgba(255,159,10,0.12);
+}
+
+/* font + canvas */
+html, body, [class*="css"], .stApp { font-family:'Poppins', -apple-system, Segoe UI, sans-serif !important; }
+.stApp { background:var(--f-bg) !important; color:var(--f-body) !important; }
+h1,h2,h3,h4,h5 { color:var(--f-ink) !important; font-weight:600 !important; letter-spacing:0 !important; }
+.stMarkdown, .stMarkdown p { color:var(--f-body) !important; }
+label, .stCaption, [data-testid="stCaptionContainer"] { color:var(--f-muted) !important; }
+@keyframes f-fade { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+
+/* Fillow .card — no border, soft shadow, 1.875rem body, transition .5s */
+[data-testid="stVerticalBlockBorderWrapper"] {
+  background:var(--f-card) !important; border:0 solid transparent !important;
+  border-radius:0.75rem !important; padding:1.875rem !important;
+  box-shadow:0 0.3125rem 0.625rem rgba(0,0,0,0.22) !important;
+  transition:all .5s ease-in-out; animation:f-fade .35s ease both; }
+[data-testid="stVerticalBlockBorderWrapper"]:hover { box-shadow:0 0.5rem 1rem rgba(0,0,0,0.34) !important; }
+/* Fillow .card-title + .card-header divider — 1.25rem, 600, capitalize */
+[data-testid="stVerticalBlockBorderWrapper"] h4 {
+  color:var(--f-ink) !important; border-left:none !important;
+  font-size:1.25rem !important; font-weight:600 !important; text-transform:capitalize !important;
+  padding:0 0 1.25rem 0 !important; margin:0 0 1.5rem 0 !important;
+  border-bottom:1px solid var(--f-line) !important; }
+@media (max-width:576px) { [data-testid="stVerticalBlockBorderWrapper"] { padding:1rem !important; } }
+
+/* KPI cards */
+/* KPI + metric cards share the .card style — no border, soft shadow, .5s */
+[data-testid="stMetric"], .stat-card {
+  background:var(--f-card) !important; border:0 solid transparent !important;
+  border-radius:0.75rem !important;
+  box-shadow:0 0.3125rem 0.625rem rgba(0,0,0,0.22) !important;
+  transition:all .5s ease-in-out; animation:f-fade .35s ease both; }
+.stat-card:hover, [data-testid="stMetric"]:hover { box-shadow:0 0.5rem 1rem rgba(0,0,0,0.34) !important; }
+.stat-card::before { display:none !important; }
+.stat-title { color:var(--f-muted) !important; }
+.stat-value { color:var(--f-ink) !important; text-shadow:none !important; font-variant-numeric:tabular-nums; }
+.stat-value.up { color:var(--f-pos) !important; }
+.stat-value.down { color:var(--f-neg) !important; }
+.stat-value.neutral { color:var(--f-accent) !important; }
+.stat-sub { color:var(--f-muted) !important; }
+[data-testid="stMetricValue"] { color:var(--f-ink) !important; font-variant-numeric:tabular-nums; }
+[data-testid="stMetricLabel"] { color:var(--f-muted) !important; }
+
+/* hero — charcoal panel with faint purple wash */
+.hero { background:linear-gradient(120deg, #241E33 0%, #202020 60%, #161717 100%) !important;
+  border:1px solid var(--f-line) !important; border-radius:12px !important;
+  box-shadow:0 0 26px rgba(0,0,0,0.25) !important; }
+.hero h1 { color:var(--f-ink) !important; } .hero .sub { color:var(--f-muted) !important; }
+.hero::after { background:radial-gradient(circle, rgba(136,108,192,0.25), transparent 70%) !important; opacity:1; }
+
+/* sticky topbar */
+.topbar { position:sticky; top:8px; z-index:20;
+  background:var(--f-card) !important; border:1px solid var(--f-line) !important;
+  border-radius:12px !important; box-shadow:0 0 26px rgba(0,0,0,0.20) !important; }
+.topbar .tb-name, .topbar .tb-v { color:var(--f-ink) !important; }
+.topbar .tb-logo { background:var(--f-accent) !important; color:#fff !important; box-shadow:none !important; }
+.topbar .tb-k, .topbar .tb-tag { color:var(--f-muted) !important; }
+.topbar .tb-v { font-variant-numeric:tabular-nums; }
+.topbar .tb-v.up { color:var(--f-pos) !important; } .topbar .tb-v.down { color:var(--f-neg) !important; }
+
+/* sidebar — charcoal rail, muted nav, purple active */
+[data-testid="stSidebar"] { background:var(--f-card) !important; border-right:1px solid var(--f-line) !important; }
+[data-testid="stSidebar"] * { color:var(--f-muted) !important; }
+[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3 { color:var(--f-ink) !important; }
+.brand .logo { background:var(--f-accent) !important; color:#fff !important; box-shadow:none !important; }
+.brand .nm { color:var(--f-ink) !important; } .brand .tg, [data-testid="stSidebar"] .stCaption { color:var(--f-muted) !important; }
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label {
+  color:var(--f-muted) !important; border-radius:8px; font-weight:500; transition:background .15s ease, color .15s ease; }
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover { background:rgba(255,255,255,0.04) !important; color:var(--f-body) !important; }
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:has(input:checked) {
+  background:var(--f-accent-bg) !important; color:var(--f-accent) !important;
+  box-shadow:inset 3px 0 0 var(--f-accent) !important; }
+[data-testid="stSidebar"] [data-testid="stMetric"] { background:var(--f-panel) !important; border:1px solid var(--f-line) !important; }
+[data-testid="stSidebar"] .stButton>button { background:var(--f-accent) !important; color:#fff !important; border:none; border-radius:999px !important; }
+
+/* buttons — pill, purple */
+.stButton>button { background:var(--f-accent) !important; color:#fff !important;
+  border:none !important; border-radius:999px !important; font-weight:600; padding:8px 22px !important;
+  box-shadow:0 8px 20px rgba(136,108,192,0.30) !important; transition:background .15s ease, filter .15s ease; }
+.stButton>button:hover { background:var(--f-accent-dk) !important; filter:brightness(1.05); }
 
 /* inputs */
 .stTextInput input, .stTextArea textarea, .stDateInput input,
-.stSelectbox div[data-baseweb="select"] > div { background:#0F1420 !important; color:var(--a-ink) !important;
-  border:1px solid var(--a-line) !important; }
+.stSelectbox div[data-baseweb="select"] > div { background:#1A1A1A !important; color:var(--f-ink) !important;
+  border:1px solid var(--f-line2) !important; border-radius:10px !important; }
+.stTextInput input::placeholder, .stTextArea textarea::placeholder { color:var(--f-faint) !important; }
+.stTextInput input:focus, .stTextArea textarea:focus, .stDateInput input:focus {
+  border-color:var(--f-accent) !important; box-shadow:0 0 0 3px rgba(136,108,192,0.20) !important; }
+
+/* pill tabs */
+.stTabs [data-baseweb="tab"] { background:var(--f-panel) !important; color:var(--f-muted) !important;
+  border:1px solid var(--f-line) !important; border-radius:999px !important; box-shadow:none !important; }
+.stTabs [aria-selected="true"] { background:var(--f-accent) !important; color:#fff !important; border-color:transparent !important; }
 
 /* tables */
-[data-testid="stDataFrame"] { border:1px solid var(--a-line) !important; box-shadow:0 8px 24px rgba(0,0,0,0.35) !important; }
-[data-testid="stDataFrame"] thead tr th { background:#0F1420 !important; color:var(--a-ink) !important; }
+[data-testid="stDataFrame"] { border:1px solid var(--f-line) !important; border-radius:10px !important;
+  box-shadow:0 0 26px rgba(0,0,0,0.20) !important; }
+[data-testid="stDataFrame"] thead tr th { background:#1A1A1A !important; color:var(--f-body) !important; }
 
 /* callouts */
-[data-testid="stAlert"] { background:#141A28 !important; color:var(--a-ink) !important; }
+[data-testid="stAlert"] { background:var(--f-panel) !important; color:var(--f-body) !important;
+  border:1px solid var(--f-line) !important; border-radius:10px !important; }
 
-/* badges */
-.badge.up { background:rgba(0,224,184,0.15) !important; color:var(--a-teal) !important; }
-.badge.down { background:rgba(255,92,122,0.15) !important; color:var(--a-red) !important; }
-.badge.neutral { background:rgba(245,196,81,0.15) !important; color:var(--a-gold) !important; }
+/* badges — Fillow rounded tags */
+.badge { border-radius:999px !important; }
+.badge.up { background:var(--f-pos-bg) !important; color:var(--f-pos) !important; }
+.badge.down { background:var(--f-neg-bg) !important; color:var(--f-neg) !important; }
+.badge.neutral { background:var(--f-accent-bg) !important; color:var(--f-accent) !important; }
+
+/* footer */
+.app-footer { background:var(--f-card) !important; border:1px solid var(--f-line) !important; color:var(--f-muted) !important; }
+
+/* section title + dividers */
+.sect .t { color:var(--f-ink) !important; } .sect .s { color:var(--f-muted) !important; }
+hr, [data-testid="stMarkdown"] hr { border-top:1px solid var(--f-line) !important; }
 
 /* scrollbar */
-::-webkit-scrollbar-thumb { background:rgba(0,224,184,0.30) !important; }
+::-webkit-scrollbar-thumb { background:var(--f-line2) !important; border-radius:10px; }
+::-webkit-scrollbar-thumb:hover { background:var(--f-accent) !important; }
+
+/* sidebar toggle — visible on charcoal */
+[data-testid="stSidebarCollapseButton"] button svg,
+[data-testid="stSidebarCollapseButton"] svg { color:var(--f-ink) !important; fill:var(--f-ink) !important; }
+[data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {
+  background:var(--f-card) !important; border:1px solid var(--f-line) !important;
+  border-radius:10px !important; box-shadow:0 8px 22px rgba(0,0,0,0.45) !important; }
+[data-testid="stSidebarCollapsedControl"] button svg, [data-testid="stSidebarCollapsedControl"] svg,
+[data-testid="collapsedControl"] button svg, [data-testid="collapsedControl"] svg {
+  color:var(--f-accent) !important; fill:var(--f-accent) !important; }
 </style>
 """
 
@@ -390,6 +849,22 @@ h1,h2,h3,h4 { color:var(--z-ink) !important; font-weight:800 !important; letter-
 /* tables -> bordered, black header */
 [data-testid="stDataFrame"] { border:3px solid var(--z-line) !important; border-radius:4px !important; box-shadow:5px 5px 0 var(--z-line); }
 [data-testid="stDataFrame"] thead tr th { background:var(--z-ink) !important; color:#fff !important; }
+
+/* T.table() HTML tables -> match the brutalist card style: grid borders, zebra, bold caps header */
+.table { color:var(--z-ink) !important; border-collapse:collapse !important; }
+.table th, .table td { border-bottom:2px solid var(--z-line) !important;
+  border-right:2px solid var(--z-line) !important; color:var(--z-ink) !important; }
+.table th:last-child, .table td:last-child { border-right:none !important; }
+.table thead th { background:var(--z-yellow) !important; color:var(--z-ink) !important;
+  border-bottom:3px solid var(--z-line) !important; text-transform:uppercase !important;
+  font-weight:800 !important; letter-spacing:0.03em !important; }
+.table tbody tr:nth-child(even) td { background:rgba(17,17,17,0.04) !important; }
+.table tbody tr:hover td { background:var(--z-cyan) !important; }
+.dash-table { border:3px solid var(--z-line) !important; border-radius:4px !important; box-shadow:5px 5px 0 var(--z-line) !important; }
+
+/* footer -> cream card, black rule */
+.app-footer { background:#FBF9F1 !important; border:3px solid var(--z-line) !important;
+  border-radius:4px !important; box-shadow:5px 5px 0 var(--z-line) !important; color:var(--z-ink) !important; }
 
 .stCaption, [data-testid="stCaptionContainer"] { font-family:'Courier New',monospace; color:#555 !important; }
 </style>
@@ -475,9 +950,10 @@ def stat_card(title: str, value, sub: str = "", tone: str = "neutral",
     if arrow:
         a = "▲ " if tone == "up" else ("▼ " if tone == "down" else "")
     cls = "stat-card mini" if mini else "stat-card"
-    return (f'<div class="{cls}"><div class="stat-title">{title}</div>'
+    return (f'<div class="{cls}"><div class="card-body">'
+            f'<div class="stat-title">{title}</div>'
             f'<div class="stat-value {tone}">{a}{value}</div>'
-            f'<div class="stat-sub">{sub}</div></div>')
+            f'<div class="stat-sub">{sub}</div></div></div>')
 
 
 def stat_row(cards: list[str]) -> str:
@@ -486,3 +962,159 @@ def stat_row(cards: list[str]) -> str:
 
 def hero(title: str, sub: str) -> str:
     return f'<div class="hero"><h1>{title}</h1><div class="sub">{sub}</div></div>'
+
+
+OVERRIDES = """
+<style>
+/* keep Streamlit's own header (holds the expand button when collapsed) visible + on top */
+header[data-testid="stHeader"] { z-index:1000001 !important; background:transparent !important; }
+
+/* attach the theme popover to the header row — same surface, no floating gap */
+/* topbar + theme picker genuinely share one container -> lay out as one row */
+.st-key-topbar_row { margin:0 0 0.75rem !important; }
+/* wrapper bg/border adapt to whichever theme is active via CSS var fallback chain —
+   never hardcode a dark surface, or light themes get dark-text-on-dark-box */
+.st-key-topbar_row [data-testid="stHorizontalBlock"] {
+  background:var(--a-card, var(--s-card, var(--f-card, rgba(127,127,140,0.08))));
+  border:1px solid var(--a-line, var(--s-line, var(--f-line, rgba(127,127,140,0.18))));
+  border-radius:16px !important; padding:8px 14px !important; align-items:center !important;
+  gap:10px !important; margin:0 !important; overflow:hidden !important;
+  flex-wrap:nowrap !important; }
+/* exempt the topbar row from the mobile column-stacking rule in RESPONSIVE */
+.st-key-topbar_row [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+  min-width:0 !important; width:auto !important; }
+.st-key-topbar_row [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+  flex:1 1 auto !important; }
+.st-key-topbar_row [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {
+  flex:0 0 150px !important; }
+.st-key-topbar_row .topbar { position:static !important; overflow:visible;
+  min-width:0; flex-wrap:wrap; }
+.st-key-topbar_row .topbar .tb-right { flex-wrap:wrap; row-gap:4px; }
+.st-key-topbar_row [data-testid="stColumn"] { padding:0 !important; margin:0 !important; }
+.st-key-topbar_row [data-testid="stElementContainer"] { margin:0 !important; padding:0 !important; }
+.st-key-topbar_row .topbar { background:transparent !important; border:none !important;
+  box-shadow:none !important; margin:0 !important; padding:10px 6px !important; }
+.st-key-topbar_row [data-testid="stWidgetLabel"] { display:none !important; }
+.st-key-topbar_row [data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+  min-height:38px; border-radius:10px !important; font-weight:600;
+  background:var(--a-panel, var(--s-panel, var(--f-panel, rgba(127,127,140,0.10)))) !important;
+  border:1px solid var(--a-line, var(--s-line, var(--f-line, rgba(127,127,140,0.20)))) !important;
+  color:inherit !important; }
+.st-key-topbar_row .topbar { background:transparent !important; border:none !important;
+  box-shadow:none !important; margin:0 !important; padding:6px 0 !important; }
+.st-key-topbar_row [data-testid="stSelectbox"] label { display:none !important; }
+.st-key-topbar_row [data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+  min-height:38px; border-radius:10px !important; font-weight:600;
+  background:var(--a-panel, var(--s-panel, var(--f-panel, rgba(127,127,140,0.10)))) !important;
+  border:1px solid var(--a-line, var(--s-line, var(--f-line, rgba(127,127,140,0.20)))) !important;
+  color:inherit !important; }
+
+/* expand-sidebar button (collapsed state) + in-sidebar collapse button — accent chip, always visible */
+[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapseButton"] button {
+  background:#886CC0 !important; border-radius:10px !important;
+  z-index:1000002 !important; box-shadow:0 6px 18px rgba(0,0,0,0.45) !important;
+  position:relative; }
+[data-testid="stExpandSidebarButton"] span, [data-testid="stExpandSidebarButton"] svg,
+[data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"],
+[data-testid="stSidebarCollapseButton"] svg {
+  color:#FFFFFF !important; fill:#FFFFFF !important; }
+
+/* legacy collapsed-control fallback (older Streamlit) */
+[data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {
+  background:#886CC0 !important; border:none !important; border-radius:10px !important;
+  z-index:1000000 !important; box-shadow:0 6px 18px rgba(0,0,0,0.45) !important; }
+[data-testid="stSidebarCollapsedControl"] svg, [data-testid="collapsedControl"] svg {
+  color:#FFFFFF !important; fill:#FFFFFF !important; }
+
+/* sidebar nav — no radio dot, clean consistent pills */
+[data-testid="stSidebar"] [role="radiogroup"] { gap:4px !important; }
+[data-testid="stSidebar"] [role="radiogroup"] > label { margin:0 !important; }
+/* hide ONLY the radio circle (the row child that isn't the text), keep the label */
+[data-testid="stSidebar"] [role="radiogroup"] label div:has(> [data-testid="stMarkdownContainer"]) > *:first-child {
+  display:none !important; }
+[data-testid="stSidebar"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] {
+  display:block !important; }
+[data-testid="stSidebar"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] p {
+  display:block !important; }
+[data-testid="stSidebar"] [role="radiogroup"] label {
+  padding:10px 14px !important; border-radius:10px !important; width:100% !important;
+  min-height:0 !important; align-items:center !important; cursor:pointer; }
+[data-testid="stSidebar"] [role="radiogroup"] label p {
+  margin:0 !important; font-size:0.9rem !important; font-weight:600 !important;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* light sidebar spacing tidy (non-structural) */
+[data-testid="stSidebar"] hr { margin:0.6rem 0 !important; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  text-transform:uppercase; letter-spacing:0.05em; font-size:0.68rem; opacity:0.72; }
+</style>
+"""
+
+
+def table(df, hover: bool = True, height: int | None = None) -> str:
+    """Roomy Fillow-style HTML table — replaces congested canvas st.dataframe.
+    Accepts a plain DataFrame or a pandas Styler (gradients/formats survive)."""
+    cls = "table table-hover" if hover else "table"
+    if hasattr(df, "to_html") and hasattr(df, "data"):  # Styler
+        try:
+            html = df.hide(axis="index").to_html(table_attributes=f'class="{cls}"')
+        except Exception:
+            html = df.to_html()
+    else:
+        html = df.to_html(classes=cls, index=False, border=0, escape=False)
+    wrap_style = f' style="max-height:{height}px;overflow-y:auto;"' if height else ""
+    return f'<div class="dash-table"{wrap_style}>{html}</div>'
+
+
+def progress(pct: float, tone: str = "primary", label: str = "") -> str:
+    """Fillow-style progress bar. tone: primary|success|danger|warning."""
+    pct = max(0.0, min(100.0, pct))
+    lab = f'<div class="pg-label"><span>{label}</span></div>' if label else ""
+    return (f'{lab}<div class="progress"><div class="progress-bar {tone}" '
+            f'style="width:{pct:.1f}%"></div></div>')
+
+
+MOUSE_GLOW_CSS = """
+<style>
+.mouse-glow { position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:radial-gradient(600px circle at var(--mx,50%) var(--my,50%),
+    rgba(136,108,192,0.10), transparent 70%);
+  transition:background 60ms linear; }
+.stApp > div:first-child { position:relative; z-index:1; }
+</style>
+<div class="mouse-glow"></div>
+"""
+
+MOUSE_GLOW_JS = """
+<script>
+try {
+  const doc = window.parent.document;
+  doc.documentElement.style.setProperty('--mx', '50%');
+  doc.documentElement.style.setProperty('--my', '50%');
+  doc.addEventListener('mousemove', function(e) {
+    doc.documentElement.style.setProperty('--mx', e.clientX + 'px');
+    doc.documentElement.style.setProperty('--my', e.clientY + 'px');
+  });
+} catch (e) {}
+</script>
+"""
+
+
+def heatmap(rows: list[tuple]) -> str:
+    """rows = list of (label, pct_change). Renders a compact colored-tile heatmap."""
+    tiles = []
+    for label, pc in rows:
+        pc = pc or 0.0
+        inten = min(abs(pc) / 3.0, 1.0)
+        color = GREEN if pc >= 0 else CORAL
+        bg = f"rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},{0.15+0.55*inten:.2f})"
+        tiles.append(f'<div class="hm-tile" style="background:{bg}">'
+                     f'<div class="hm-l">{label}</div><div class="hm-v">{pc:+.2f}%</div></div>')
+    return f'<div class="hm-grid">{"".join(tiles)}</div>'
+
+
+def footer(asof: str | None = None) -> str:
+    right = f'Snapshot as of {asof}' if asof else 'No snapshot yet'
+    return (f'<div class="app-footer"><div class="af-left">📈 <b>NSE Alpha</b> · '
+            f'Investor Intelligence</div>'
+            f'<div class="af-mid">Educational, from public NSE/BSE data — not investment advice.</div>'
+            f'<div class="af-right">{right}</div></div>')
