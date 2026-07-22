@@ -23,8 +23,16 @@ from dashboard import watchlist as W  # noqa: E402
 from dashboard import derive as D  # noqa: E402
 from dashboard import insights as I  # noqa: E402
 
-st.set_page_config(page_title="NSE Investor Dashboard", page_icon="📈", layout="wide")
+st.set_page_config(page_title="NSE Investor Dashboard", page_icon="📈", layout="wide",
+                   initial_sidebar_state="expanded")
 st.markdown(T.CSS, unsafe_allow_html=True)
+st.markdown(T.POLISH, unsafe_allow_html=True)
+st.markdown(T.RESPONSIVE, unsafe_allow_html=True)
+_theme = st.sidebar.selectbox("🎨 Theme", ["Aurora (dark)", "Modern", "Zine"], key="ui_theme")
+if _theme == "Aurora (dark)":
+    st.markdown(T.AURORA, unsafe_allow_html=True)
+elif _theme == "Zine":
+    st.markdown(T.ZINE, unsafe_allow_html=True)
 
 # cache the warehouse reads; sidebar button clears it after a fresh collection
 _cache = st.cache_data(ttl=300)
@@ -78,15 +86,16 @@ def card():
 
 
 # ---------------------------------------------------------------- sidebar
-st.sidebar.markdown("## 📈 NSE Dashboard")
-st.sidebar.caption("Investor view over the local CSV warehouse")
+st.sidebar.markdown(T.brand("NSE Alpha", "Investor Intelligence"), unsafe_allow_html=True)
+st.sidebar.markdown("")
 if st.sidebar.button("🔄 Reload data"):
     st.cache_data.clear()
     st.rerun()
 
 asof = L.snapshot_asof("all_indices") or L.snapshot_asof("top_gainers")
 
-PAGES = ["📊 Market Pulse", "🏆 Conviction", "🎯 Signals", "📞 Concalls", "🚀 Movers", "🗓️ Day Explorer",
+PAGES = ["📊 Market Pulse", "📡 What's New", "💼 Portfolio", "🏆 Conviction",
+         "🎯 Signals", "📞 Concalls", "🚀 Movers", "🗓️ Day Explorer",
          "💰 Smart Money", "📉 Derivatives & FII", "📦 Delivery & Value",
          "🧭 Sectors", "🗂️ Filings", "🔔 Need Attention", "📈 History", "🩺 Data Health"]
 PAGE = st.sidebar.radio("nav", PAGES, label_visibility="collapsed")
@@ -165,6 +174,24 @@ st.sidebar.markdown("---")
 st.sidebar.caption("Signals are educational, from public data — not investment advice.")
 
 # ---------------------------------------------------------------- hero
+# ---------------------------------------------------------------- top header
+st.markdown(T.TOPBAR_CSS, unsafe_allow_html=True)
+_chips = [("Date", dt.date.today().strftime("%a, %d %b %Y").upper(), "")]
+_idx = load_snapshot_latest("all_indices")
+if not _idx.empty and "index" in _idx.columns:
+    _n = _idx[_idx["index"].astype(str).str.upper() == "NIFTY 50"]
+    if not _n.empty:
+        _pc = L.to_num(_n["percentChange"]).iloc[0]
+        _lv = L.to_num(_n["last"]).iloc[0]
+        _t = "up" if (_pc or 0) >= 0 else "down"
+        _chips.append(("Nifty 50", f'{_lv:,.0f} ({_pc:+.2f}%)', _t))
+_ad = load_snapshot_latest("advances_declines")
+if not _ad.empty and {"metric", "value"} <= set(_ad.columns):
+    _m = dict(zip(_ad["metric"], L.to_num(_ad["value"])))
+    _r = (_m.get("Advances", 0) / _m.get("Declines", 1)) if _m.get("Declines") else 0
+    _chips.append(("A/D ratio", f"{_r:.2f}", "up" if _r > 1 else "down"))
+st.markdown(T.topbar(_chips), unsafe_allow_html=True)
+
 st.markdown(T.hero(f"{PAGE}",
                    f"NSE / BSE investor dashboard &nbsp;|&nbsp; as of {asof or '—'}"),
             unsafe_allow_html=True)
@@ -292,6 +319,92 @@ if PAGE == "📊 Market Pulse":
                    .format({"Score": "{:+d}", "Deliv%": "{:.0f}", "%Chg": "{:+.2f}"}, na_rep="-"),
                 width="stretch", hide_index=True)
             st.caption("See the **🏆 Conviction** tab for the full leaderboard.")
+
+
+# ================================================================ What's New
+if PAGE == "📡 What's New":
+    st.caption("Daily digest — what changed today: breakouts, quiet accumulation, "
+               "FII stance, ban entries, results due.")
+    d = _conv_data()
+    breakouts = S.screen_breakouts(d["bhav"], load_per_date("week52_high_low"))
+    spikes = I.delivery_spike(load_per_date_all("bhavcopy_delivery"))
+    fii_div = I.fii_client_divergence(load_per_date_all("participant_oi"))
+    earn = load_growing("earnings_calendar")
+    dig = I.whats_changed(breakouts=breakouts, spikes=spikes, fii_div=fii_div,
+                          ban=d["ban"], earnings=earn, bulk=d["bulk"])
+
+    if dig["fii_note"]:
+        st.markdown("### ⚠️ " + T.badge(dig["fii_note"], "down"), unsafe_allow_html=True)
+    st.markdown(T.stat_row([
+        T.stat_card("New/near 52wk highs", f'{len(breakouts)}', "momentum", "up"),
+        T.stat_card("Delivery spikes", f'{len(spikes)}', "accumulation", "up"),
+        T.stat_card("In F&O ban", f'{len(dig["ban"])}', "avoid leverage", "down" if dig["ban"] else "neutral"),
+    ]), unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        with card():
+            st.markdown("#### 🚀 Breakouts (at/near 52wk high)")
+            st.dataframe(breakouts, width="stretch", height=320, hide_index=True) if not breakouts.empty else _hint()
+    with c2:
+        with card():
+            st.markdown("#### 📦 Delivery spikes (vs 20d avg)")
+            st.dataframe(spikes, width="stretch", height=320, hide_index=True) if not spikes.empty else _hint("Needs a few days of bhav copy.")
+
+    with card():
+        st.markdown("#### 🏦 FII vs Client — net index futures trend")
+        if not fii_div.empty:
+            cols = [c for c in ["FII", "Client", "DII", "Pro"] if c in fii_div.columns]
+            st.line_chart(fii_div.set_index("date")[cols])
+        else:
+            _hint("Needs participant OI for 2+ days.")
+
+    e1, e2 = st.columns(2)
+    with e1:
+        with card():
+            st.markdown("#### 📅 Results / events due")
+            st.dataframe(dig["earnings"], width="stretch", height=280, hide_index=True) if not dig["earnings"].empty else _hint()
+    with e2:
+        with card():
+            st.markdown("#### 🚫 Securities in F&O ban")
+            st.dataframe(pd.DataFrame({"Symbol": dig["ban"]}), width="stretch", height=280, hide_index=True) if dig["ban"] else st.success("None in ban.")
+
+
+# ================================================================ Portfolio
+if PAGE == "💼 Portfolio":
+    st.caption("Paste your holdings → live P&L + conviction + risk for each. "
+               "Format per line: SYMBOL QTY AVGCOST (e.g. RELIANCE 50 2450)")
+    txt = st.text_area("Holdings", height=140, key="pf_txt",
+                       placeholder="RELIANCE 50 2450\nTCS 20 3600\nCARYSIL 100 820")
+    if txt.strip():
+        hold = I.parse_holdings(txt)
+        if hold.empty:
+            _hint("Couldn't parse — use: SYMBOL QTY AVGCOST per line.")
+        else:
+            d = _conv_data()
+            scorer = lambda s: S.stock_scorecard(s, **d)
+            px = I.portfolio_xray(hold, d["bhav"], scorer)
+            inv = px["Invested"].dropna().sum()
+            cur = px["Current"].dropna().sum()
+            pnl = cur - inv
+            st.markdown(T.stat_row([
+                T.stat_card("Invested", f'₹{inv:,.0f}', f'{len(px)} holdings', "neutral"),
+                T.stat_card("Current", f'₹{cur:,.0f}', "market value", "neutral"),
+                T.stat_card("P&L", f'₹{pnl:,.0f}', f'{(pnl/inv*100 if inv else 0):+.1f}%',
+                            "up" if pnl >= 0 else "down", arrow=True),
+                T.stat_card("Avg conviction", f'{px["Conviction"].dropna().mean():+.1f}'
+                            if px["Conviction"].notna().any() else "—", "signal", "neutral"),
+            ]), unsafe_allow_html=True)
+            with card():
+                st.markdown("#### Holdings X-ray")
+                st.dataframe(
+                    px.style.background_gradient(subset=["P&L%"], cmap="RdYlGn")
+                      .background_gradient(subset=["Conviction"], cmap="RdYlGn")
+                      .format({"AvgCost": "{:,.2f}", "LTP": "{:,.2f}", "Invested": "{:,.0f}",
+                               "Current": "{:,.0f}", "P&L": "{:,.0f}", "P&L%": "{:+.1f}",
+                               "Conviction": "{:+.0f}"}, na_rep="-"),
+                    width="stretch", height=420, hide_index=True)
+            st.caption("Conviction = live signal score; cross-check verdict before acting.")
 
 
 # ================================================================ Signals
