@@ -32,12 +32,32 @@ bse_symbol_history = _cache(L.bse_symbol_history)
 index_history = _cache(L.index_history)
 index_names = _cache(L.index_names)
 concall_quarters = _cache(L.concall_quarters)
+# uncached — the analyzer moves files mid-session, these must always be live
+concall_pdf_quarters = L.concall_pdf_quarters
+concall_pending = L.concall_pending
 concall_index = _cache(L.concall_index)
 concall_text = _cache(L.concall_text)
 match_symbol = _cache(L.match_symbol)
+industry_map = _cache(L.industry_map)
+market_map = _cache(L.market_map)
+result_pdfs = _cache(L.result_pdfs)
+result_quarters = _cache(L.result_quarters)
+# uncached — the analyzer moves files mid-session, these must always be live
+result_pdf_quarters = L.result_pdf_quarters
+result_pending = L.result_pending
+result_summary = _cache(L.result_summary)
+result_index = _cache(L.result_index)
+fundamentals_symbols = _cache(L.fundamentals_symbols)
+fundamentals_doc = _cache(L.fundamentals_doc)
+fundamentals_facts = _cache(L.fundamentals_facts)
+fundamentals_issues = _cache(L.fundamentals_issues)
+fundamentals_manifest = _cache(L.fundamentals_manifest)
 
 SYMBOLS = all_symbols()
 NAMES = company_map()
+
+# where result-reference-doc-analaysis.txt lives; override with NSE_RESULT_REF_DIR
+REF_DOC_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "Documents")
 
 
 def symbol_select(label: str, key: str, help: str | None = None) -> str:
@@ -52,6 +72,37 @@ def symbol_select(label: str, key: str, help: str | None = None) -> str:
 
 def _hint(msg: str = "No data yet — run the collector to populate this."):
     st.info(msg)
+
+
+def search(key: str, label: str = "Search", placeholder: str = "symbol, company, keyword…",
+           help: str | None = None) -> str:
+    """Standard search input. Returns the upper-cased needle ('' when empty)."""
+    return st.text_input(label, key=key, placeholder=placeholder, help=help).strip().upper()
+
+
+def apply_search(df: pd.DataFrame, needle: str, cols: list[str] | None = None) -> pd.DataFrame:
+    """Keep rows matching every whitespace-separated term across `cols`."""
+    if not needle or df is None or df.empty:
+        return df
+    use = [c for c in (cols or df.columns) if c in df.columns]
+    if not use:
+        return df
+    hay = df[use].astype(str).agg(" ".join, axis=1).str.upper()
+    mask = pd.Series(True, index=df.index)
+    for term in needle.split():
+        mask &= hay.str.contains(term, regex=False, na=False)
+    return df[mask]
+
+
+def searched(df: pd.DataFrame, key: str, cols: list[str] | None = None,
+             label: str = "Search", placeholder: str = "symbol, company, keyword…",
+             caption: bool = True) -> pd.DataFrame:
+    """Search input + filtered frame in one call — the common table case."""
+    q = search(key, label, placeholder)
+    out = apply_search(df, q, cols)
+    if q and caption:
+        st.caption(f"{len(out):,} of {len(df):,} rows match “{q}”.")
+    return out
 
 
 def _num(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -88,6 +139,94 @@ def _bse_collector(polite: float = 1.0):
     s.polite_delay = polite
     setup_logging(s)
     return BseCollector(s)
+
+
+def _parse_results(single: str | None = None, rebuild: bool = False) -> tuple[int, str]:
+    """Run the result-PDF parser in-process and hand back (exit code, log)."""
+    import contextlib
+    import io
+
+    from fundamentals import cli as F
+
+    os.environ["NSE_DATA_DIR"] = L.DATA_DIR  # cli resolves its output off this
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        try:
+            code = F.run(L.RESULT_PDF_DIR, single, rebuild)
+        except Exception as exc:
+            print(f"FATAL: {exc}")
+            code = 1
+    return code, buf.getvalue()
+
+
+def _run_analyzer(quarter: str, single: str | None = None,
+                  timeout: int = 3600) -> tuple[int, str]:
+    """Drive the result-analyzer agent headlessly over one quarter folder."""
+    import shutil
+    import subprocess
+
+    exe = shutil.which("claude")
+    if not exe:
+        return 1, ("`claude` CLI not found on PATH. Install Claude Code "
+                   "(npm i -g @anthropic-ai/claude-code) to run the agent from here.")
+
+    root = os.path.dirname(L.RESULT_PDF_DIR)
+    target = os.path.join(L.RESULT_PDF_DIR, quarter)
+    scope = f"only the file {single}" if single else "every unprocessed PDF"
+    prompt = (f"Run the result-analyzer routine on {target} — process {scope}. "
+              "Append each record to results-summary.json in that folder, then move "
+              "the PDF into done/ once the record is written.")
+    cmd = [exe, "-p", prompt, "--agent", "result-analyzer",
+           "--permission-mode", "acceptEdits"]
+    # agent reads its house-style reference doc from outside the repo
+    ref = os.environ.get("NSE_RESULT_REF_DIR", REF_DOC_DIR)
+    if ref and os.path.isdir(ref):
+        cmd += ["--add-dir", ref]
+    try:
+        r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 1, f"Agent timed out after {timeout}s — rerun to pick up where it stopped."
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def _run_concall_analyzer(quarter: str, single: str | None = None,
+                          timeout: int = 3600) -> tuple[int, str]:
+    """Drive the concall-analyzer agent headlessly over one quarter folder."""
+    import shutil
+    import subprocess
+
+    exe = shutil.which("claude")
+    if not exe:
+        return 1, ("`claude` CLI not found on PATH. Install Claude Code "
+                   "(npm i -g @anthropic-ai/claude-code) to run the agent from here.")
+
+    root = os.path.dirname(L.CONCALL_DIR)
+    target = os.path.join(L.CONCALL_DIR, quarter)
+    done = os.path.join(target, "done")
+    files = [single] if single else L.concall_pending(quarter)
+    if not files:
+        return 1, f"No transcripts pending in concall-data/{quarter}."
+
+    logs, worst = [], 0
+    # one agent run per transcript — each does its own web research, so batching them blows context
+    for name in files:
+        prompt = (
+            f"Analyze the earnings concall transcript at {os.path.join(target, name)}.\n"
+            f"Write the complete report as a Markdown file inside {target} — that quarter "
+            f"folder is the only place it may go. Name it <Company>_{quarter}.md, taking the "
+            f"company name from the transcript and using underscores for spaces.\n"
+            f"Once the .md exists on disk, move the source PDF into {done}."
+        )
+        cmd = [exe, "-p", prompt, "--agent", "concall-analyzer",
+               "--permission-mode", "acceptEdits"]
+        try:
+            r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=timeout)
+            out, code = (r.stdout + r.stderr).strip(), r.returncode
+        except subprocess.TimeoutExpired:
+            out, code = f"timed out after {timeout}s", 1
+        worst = max(worst, code)
+        logs.append(f"=== {name} (exit {code}) ===\n{out}")
+    return worst, "\n\n".join(logs)
 
 
 def _conv_data():

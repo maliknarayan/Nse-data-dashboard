@@ -17,6 +17,10 @@ bse/data/
 concall-data/
 index_history/
 
+# Source result PDFs and the parsed fundamentals warehouse
+result-pdf/
+data/fundamentals/
+
 # Runtime state
 data/_watchlist.json
 data/_watchlist_state.json
@@ -36,3 +40,5 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+.playwright-mcp

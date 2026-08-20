@@ -111,6 +111,93 @@ def bars(series: pd.Series, dark: bool, color=None, height: int = 300) -> go.Fig
     return fig
 
 
+def _map_hover(dark: bool) -> dict:
+    """High-contrast tooltip — the shared muted grey is unreadable on the map."""
+    return dict(bgcolor=("#10141F" if dark else "#FFFFFF"),
+                bordercolor=("#3D4557" if dark else "#D0D5DD"),
+                font=dict(family=_FONT, size=12.5, color=_ink(dark)),
+                align="left")
+
+
+def _diverge_scale(dark: bool) -> list:
+    mid = "#2A2F3D" if dark else "#E7EAF0"
+    return [[0.0, "#B42318"], [0.25, T.CORAL], [0.5, mid],
+            [0.75, T.GREEN], [1.0, "#0E7A4B"]]
+
+
+def treemap(d: pd.DataFrame, group: str, label: str, size: str, color: str,
+            dark: bool, crange: float = 5.0, cmid: float = 0.0, height: int = 640,
+            ctitle: str = "% change") -> go.Figure:
+    """Group → stock treemap. Tile area = `size`, tile colour = `color` around zero."""
+    d = d.dropna(subset=[size, color])
+    d = d[d[size] > 0]
+    if d.empty:
+        return go.Figure().update_layout(**_layout(dark, height))
+    g = d[group].astype(str)
+    tot = d.groupby(g)[size].sum()
+    # parent tile takes the size-weighted mean so a sector reads as its own move
+    wsum = d.assign(_w=d[size] * d[color]).groupby(g)["_w"].sum()
+    gcol = (wsum / tot).reindex(tot.index)
+
+    fig = go.Figure(go.Treemap(
+        ids=["G|" + i for i in tot.index] + ["S|" + s for s in d[label].astype(str)],
+        labels=list(tot.index) + d[label].astype(str).tolist(),
+        parents=[""] * len(tot) + ["G|" + i for i in g],
+        values=list(tot.values) + d[size].tolist(),
+        branchvalues="total", sort=True, tiling=dict(pad=2),
+        marker=dict(colors=list(gcol.values) + d[color].tolist(),
+                    colorscale=_diverge_scale(dark), cmid=cmid,
+                    cmin=cmid - crange, cmax=cmid + crange, cornerradius=4,
+                    line=dict(width=0)),
+        textposition="middle center",
+        textfont=dict(family=_FONT, size=12, color="#FFFFFF"),
+        customdata=[[round(v, 2)] for v in gcol.values] +
+                   [[round(v, 2)] for v in d[color]],
+        hovertemplate="<b>%{label}</b><br>" + ctitle +
+                      ": %{customdata[0]:+.2f}<br>" + size + ": %{value:,.1f}<extra></extra>",
+    ))
+    fig.update_layout(**_layout(dark, height))
+    fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), hoverlabel=_map_hover(dark))
+    return fig
+
+
+def heatgrid(d: pd.DataFrame, label: str, color: str, dark: bool, cols: int = 16,
+             height: int | None = None, crange: float = 5.0, cmid: float = 0.0,
+             ctitle: str = "% change", hover: list[str] | None = None) -> go.Figure:
+    """Equal-size block grid — one square per company, colour = `color`."""
+    import math
+
+    d = d.dropna(subset=[color]).reset_index(drop=True)
+    if d.empty:
+        return go.Figure().update_layout(**_layout(dark, height or 400))
+    rows = math.ceil(len(d) / cols)
+    height = height or max(360, min(1400, rows * 34 + 40))
+    z = [[None] * cols for _ in range(rows)]
+    txt = [[""] * cols for _ in range(rows)]
+    hov = [[""] * cols for _ in range(rows)]
+    hcols = [c for c in (hover or []) if c in d.columns and c != color]  # ctitle already shows it
+    for i, r in d.iterrows():
+        y, x = rows - 1 - i // cols, i % cols  # fill top-left first
+        z[y][x] = float(r[color])
+        txt[y][x] = str(r[label])[:8]  # long tickers bleed into the next cell
+        extra = "<br>".join(f"{c}: {r[c]:,.2f}" if isinstance(r[c], (int, float))
+                            else f"{c}: {r[c]}" for c in hcols)
+        hov[y][x] = f"<b>{r[label]}</b><br>{ctitle}: {r[color]:+.2f}" + (f"<br>{extra}" if extra else "")
+
+    fig = go.Figure(go.Heatmap(
+        z=z, text=txt, hovertext=hov, texttemplate="%{text}", xgap=3, ygap=3,
+        textfont=dict(family=_FONT, size=9, color="#FFFFFF"),
+        colorscale=_diverge_scale(dark), zmid=cmid,
+        zmin=cmid - crange, zmax=cmid + crange,
+        hovertemplate="%{hovertext}<extra></extra>",
+        colorbar=dict(title=ctitle, thickness=10, outlinewidth=0,
+                      tickfont=dict(family=_FONT, size=10, color=_muted(dark)))))
+    fig.update_layout(**_layout(dark, height))
+    fig.update_layout(xaxis=dict(visible=False), yaxis=dict(visible=False),
+                      margin=dict(l=0, r=0, t=0, b=0), hoverlabel=_map_hover(dark))
+    return fig
+
+
 def lines(data, dark: bool, height: int = 300, area: bool = False,
           colors: list[str] | None = None) -> go.Figure:
     """Line/area. data = Series (single) or DataFrame (one line per column).

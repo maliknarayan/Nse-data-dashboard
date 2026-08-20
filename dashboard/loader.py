@@ -9,6 +9,7 @@ DuckDB/parquet backend is a single-file swap here too.
 from __future__ import annotations
 
 import glob
+import json
 import os
 
 import pandas as pd
@@ -206,6 +207,18 @@ def concall_quarters() -> list[str]:
     return out
 
 
+def concall_pdf_quarters() -> list[str]:
+    """Every quarter folder under concall-data, analyzed or not."""
+    return sorted(os.path.basename(p) for p in glob.glob(os.path.join(CONCALL_DIR, "*"))
+                  if os.path.isdir(p) and os.path.basename(p) != "done")
+
+
+def concall_pending(quarter: str) -> list[str]:
+    """Transcripts in a quarter folder the analyzer hasn't moved into done/ yet."""
+    return sorted(os.path.basename(p)
+                  for p in glob.glob(os.path.join(CONCALL_DIR, quarter, "*.pdf")))
+
+
 def _parse_concall(path: str) -> dict:
     try:
         with open(path, encoding="utf-8") as fh:
@@ -265,6 +278,215 @@ def match_symbol(company: str) -> str | None:
         if toks[0] == sym.upper():
             best = sym
     return best
+
+
+def industry_map() -> dict:
+    """symbol -> industry. Corporate announcements are the only feed carrying it,
+    so coverage is partial (roughly the names that filed something)."""
+    ann = load_growing("corporate_announcements")
+    if ann.empty or not {"symbol", "Industry"} <= set(ann.columns):
+        return {}
+    m = ann[["symbol", "Industry"]].dropna()
+    m["symbol"] = m["symbol"].astype(str).str.strip().str.upper()
+    m["Industry"] = m["Industry"].astype(str).str.strip()
+    m = m[m["Industry"].ne("") & m["Industry"].ne("-") & m["symbol"].ne("")]
+    return dict(m.drop_duplicates("symbol").values)
+
+
+_SIZE_BANDS = [(500, "Mega (₹500cr+)"), (100, "Large (₹100-500cr)"),
+               (25, "Mid (₹25-100cr)"), (5, "Small (₹5-25cr)"), (0, "Micro (<₹5cr)")]
+_MOVE_BANDS = [(5, "Up > 5%"), (2, "Up 2-5%"), (0, "Up 0-2%"),
+               (-2, "Down 0-2%"), (-5, "Down 2-5%"), (-1e9, "Down > 5%")]
+_DELIV_BANDS = [(75, "Delivery > 75%"), (50, "Delivery 50-75%"),
+                (25, "Delivery 25-50%"), (0, "Delivery < 25%")]
+
+
+def _band(v, bands, na="Unknown"):
+    if pd.isna(v):
+        return na
+    for cut, name in bands:
+        if v >= cut:
+            return name
+    return bands[-1][1]
+
+
+def market_map(date: str | None = None) -> pd.DataFrame:
+    """One row per EQ stock for the market map — move, liquidity, valuation, industry."""
+    bhav = load_per_date("bhavcopy_delivery", date)
+    if bhav.empty or "SYMBOL" not in bhav.columns:
+        return pd.DataFrame()
+    b = bhav.copy()
+    if "SERIES" in b.columns:
+        b = b[b["SERIES"].astype(str).str.strip() == "EQ"]
+    for c in ("CLOSE_PRICE", "PREV_CLOSE", "DELIV_PER", "TTL_TRD_QNTY",
+              "TURNOVER_LACS", "NO_OF_TRADES"):
+        if c in b.columns:
+            b[c] = to_num(b[c])
+    b["Symbol"] = b["SYMBOL"].astype(str).str.strip().str.upper()
+    b = b.drop_duplicates("Symbol")
+    b["%Chg"] = (b["CLOSE_PRICE"] - b["PREV_CLOSE"]) / b["PREV_CLOSE"] * 100
+    b["Turnover Cr"] = b["TURNOVER_LACS"] / 100
+    b["Name"] = b["Symbol"].map(company_map()).fillna(b["Symbol"])
+    b["Industry"] = b["Symbol"].map(industry_map()).fillna("Unclassified")
+
+    pe = load_per_date("pe_ratio", date)
+    if not pe.empty:
+        pecol = next((c for c in pe.columns if "P/E" in c.upper()), None)
+        scol = "SYMBOL" if "SYMBOL" in pe.columns else pe.columns[0]
+        if pecol:
+            p = pe[[scol, pecol]].copy()
+            p.columns = ["Symbol", "P/E"]
+            p["Symbol"] = p["Symbol"].astype(str).str.strip().str.upper()
+            p["P/E"] = to_num(p["P/E"])
+            b = b.merge(p.drop_duplicates("Symbol"), on="Symbol", how="left")
+    if "P/E" not in b.columns:
+        b["P/E"] = float("nan")
+
+    w52 = load_per_date("week52_high_low", date)
+    if not w52.empty and "Adjusted_52_Week_High" in w52.columns:
+        w = w52[["SYMBOL", "Adjusted_52_Week_High"]].copy()
+        w.columns = ["Symbol", "52wHigh"]
+        w["Symbol"] = w["Symbol"].astype(str).str.strip().str.upper()
+        w["52wHigh"] = to_num(w["52wHigh"])
+        b = b.merge(w.drop_duplicates("Symbol"), on="Symbol", how="left")
+        b["% From High"] = (b["CLOSE_PRICE"] - b["52wHigh"]) / b["52wHigh"] * 100
+    else:
+        b["52wHigh"] = float("nan")
+        b["% From High"] = float("nan")
+
+    b["Size tier"] = b["Turnover Cr"].map(lambda v: _band(v, _SIZE_BANDS))
+    b["Move band"] = b["%Chg"].map(lambda v: _band(v, _MOVE_BANDS))
+    b["Delivery band"] = b["DELIV_PER"].map(lambda v: _band(v, _DELIV_BANDS))
+    keep = ["Symbol", "Name", "Industry", "Size tier", "Move band", "Delivery band",
+            "CLOSE_PRICE", "%Chg", "DELIV_PER", "Turnover Cr", "TTL_TRD_QNTY",
+            "NO_OF_TRADES", "P/E", "% From High"]
+    out = b[[c for c in keep if c in b.columns]].rename(
+        columns={"CLOSE_PRICE": "Close", "DELIV_PER": "Delivery %",
+                 "TTL_TRD_QNTY": "Volume", "NO_OF_TRADES": "Trades"})
+    return out.sort_values("Turnover Cr", ascending=False).reset_index(drop=True)
+
+
+RESULT_PDF_DIR = os.path.join(_PROJECT_ROOT, "result-pdf")
+FUND_DIR = os.path.join(DATA_DIR, "fundamentals")
+
+
+def result_pdfs() -> pd.DataFrame:
+    """Every PDF sitting in result-pdf/, with size and mtime."""
+    files = sorted(glob.glob(os.path.join(RESULT_PDF_DIR, "*.pdf")))
+    rows = []
+    for f in files:
+        stat = os.stat(f)
+        rows.append({"File": os.path.basename(f),
+                     "MB": round(stat.st_size / 1_048_576, 2),
+                     "Added": pd.to_datetime(stat.st_mtime, unit="s").strftime("%Y-%m-%d %H:%M")})
+    return pd.DataFrame(rows)
+
+
+def result_quarters() -> list[str]:
+    """Quarter folders under result-pdf/ that carry an analyzer summary."""
+    return sorted(os.path.basename(os.path.dirname(p))
+                  for p in glob.glob(os.path.join(RESULT_PDF_DIR, "*", "results-summary.json")))
+
+
+def result_pdf_quarters() -> list[str]:
+    """Every quarter folder under result-pdf/, analyzed or not."""
+    return sorted(os.path.basename(p) for p in glob.glob(os.path.join(RESULT_PDF_DIR, "*"))
+                  if os.path.isdir(p) and os.path.basename(p) != "done")
+
+
+def result_pending(quarter: str) -> list[str]:
+    """PDFs in a quarter folder the analyzer hasn't moved into done/ yet."""
+    return sorted(os.path.basename(p)
+                  for p in glob.glob(os.path.join(RESULT_PDF_DIR, quarter, "*.pdf")))
+
+
+def result_summary(quarter: str) -> dict:
+    """Raw results-summary.json for one quarter."""
+    p = os.path.join(RESULT_PDF_DIR, quarter, "results-summary.json")
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def _fin(rec: dict, key: str, field: str = "current"):
+    return ((rec.get("financials") or {}).get(key) or {}).get(field)
+
+
+def result_index(quarter: str) -> pd.DataFrame:
+    """Flatten a quarter's analyzed results into one screener row per company."""
+    recs = result_summary(quarter).get("results") or []
+    rows = []
+    for i, r in enumerate(recs):
+        rows.append({
+            "Company": r.get("company") or "—",
+            "Verdict": r.get("verdict") or "—",
+            "Grade": r.get("sub_verdict") or "—",
+            "Rev Cr": _fin(r, "revenue"),
+            "Rev YoY %": _fin(r, "revenue", "yoy_pct"),
+            "Rev QoQ %": _fin(r, "revenue", "qoq_pct"),
+            "EBITDA Cr": _fin(r, "ebitda"),
+            "EBITDA YoY %": _fin(r, "ebitda", "yoy_pct"),
+            "Margin %": _fin(r, "ebitda_margin"),
+            "Margin bps": _fin(r, "ebitda_margin", "yoy_bps"),
+            "PAT Cr": _fin(r, "pat"),
+            "PAT YoY %": _fin(r, "pat", "yoy_pct"),
+            "PAT QoQ %": _fin(r, "pat", "qoq_pct"),
+            "Basis": r.get("basis") or "—",
+            "SME": bool(r.get("is_sme")),
+            "Tags": ", ".join(r.get("tags") or []),
+            "Flags": len(r.get("red_flags") or []),
+            "Date": r.get("analyzed_on") or "",
+            "_i": i,
+        })
+    return pd.DataFrame(rows)
+
+
+def fundamentals_symbols() -> list[str]:
+    if not os.path.isdir(FUND_DIR):
+        return []
+    return sorted(os.path.basename(p)[:-5]
+                  for p in glob.glob(os.path.join(FUND_DIR, "*.json")))
+
+
+def fundamentals_doc(symbol: str) -> dict:
+    p = os.path.join(FUND_DIR, f"{symbol}.json")
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def _fund_csv(name: str) -> pd.DataFrame:
+    p = os.path.join(FUND_DIR, name)
+    if not os.path.exists(p):
+        return pd.DataFrame()
+    try:
+        return _clean(pd.read_csv(p))
+    except Exception:
+        return pd.DataFrame()
+
+
+def fundamentals_facts() -> pd.DataFrame:
+    return _fund_csv("_facts.csv")
+
+
+def fundamentals_issues() -> pd.DataFrame:
+    return _fund_csv("_issues.csv")
+
+
+def fundamentals_manifest() -> pd.DataFrame:
+    """Parse log, newest run first."""
+    df = _fund_csv("_manifest.csv")
+    if df.empty or "run_ts" not in df.columns:
+        return df
+    return df.sort_values("run_ts", ascending=False)
 
 
 def load_manifest() -> pd.DataFrame:
