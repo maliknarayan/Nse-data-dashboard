@@ -21,21 +21,27 @@ from dashboard import loader as L  # noqa: E402
 from dashboard import theme as T  # noqa: E402
 from dashboard import signals as S  # noqa: E402
 from dashboard import watchlist as W  # noqa: E402
+from dashboard import portfolio as PF  # noqa: E402
 from dashboard import derive as D  # noqa: E402
 from dashboard import insights as I  # noqa: E402
 from dashboard import charts as C  # noqa: E402
 from dashboard import glossary as G  # noqa: E402
+from dashboard import snapshots as SNAP  # noqa: E402
+from dashboard import valuation as V  # noqa: E402
 from dashboard.ui import (  # noqa: E402
     load_growing, load_snapshot_latest, load_per_date, per_date_dates,
     load_per_date_all, load_manifest, all_symbols, company_map, symbol_history,
-    bse_symbols, bse_symbol_history, index_history, index_names, concall_quarters,
-    concall_index, concall_text, match_symbol, SYMBOLS, NAMES, symbol_select,
-    _hint, _num, card, _collector, _bse_collector, _conv_data,
-    result_pdfs, result_quarters, result_summary, result_index,
+    bse_symbols, bse_symbol_history, index_history, index_names, niftyindices_history,
+    concall_quarters,
+    concall_index, concall_summary, concall_text, match_symbol, SYMBOLS, NAMES, symbol_select,
+    _hint, _num, card, _collector, _bse_collector, _niftyindices_collector, _conv_data,
+    result_pdfs, result_quarters, result_summary, result_index, concall_peers,
+    ratio_hits, industry_ratios, ratio_family,
     result_pdf_quarters, result_pending, market_map, searched, apply_search, search,
     concall_pdf_quarters, concall_pending, _run_concall_analyzer,
     fundamentals_symbols, fundamentals_doc, fundamentals_facts,
     fundamentals_issues, fundamentals_manifest, _parse_results, _run_analyzer,
+    peg_table,
 )
 
 st.set_page_config(page_title="NSE Investor Dashboard", page_icon="📈", layout="wide",
@@ -74,15 +80,25 @@ st.sidebar.markdown("")
 asof = L.snapshot_asof("all_indices") or L.snapshot_asof("top_gainers")
 
 NAV = {
-    "📊 Overview": ["📊 Market Pulse", "📡 What's New", "🩺 Data Health", "⚙️ Settings"],
-    "🎯 Ideas & Signals": ["🎯 Signals", "🔎 Screener", "⚖️ Peer Compare",
-                           "🏆 Conviction", "💼 Portfolio"],
+    "📊 Overview": ["⭐ Top Ideas", "📊 Market Pulse", "📡 What's New", "🩺 Data Health", "⚙️ Settings"],
+    "🎯 Ideas & Signals": ["🎯 Signals", "🔎 Screener", "💎 Value & PEG", "⚖️ Peer Compare",
+                           "🏆 Conviction", "💼 Portfolio", "🧮 Capital Allocator"],
     "📈 Markets": ["🗺️ Market Map", "🚀 Movers", "🗓️ Day Explorer", "🧭 Sectors", "📈 History"],
     "💰 Flows & Derivatives": ["💰 Smart Money", "📉 Derivatives & FII",
                                "🧩 F&O / Options", "📦 Delivery & Value"],
-    "📰 Filings & Calls": ["📞 Concalls", "📄 Result PDFs", "🧾 Result Scorecard",
+    "📰 Filings & Calls": ["📞 Concalls", "🧬 Concall Peers", "📜 Guidance Tracker",
+                           "📄 Result PDFs", "🧾 Result Scorecard", "🥇 Best of Quarter",
                            "🗂️ Filings", "🔔 Need Attention"],
 }
+_goto = st.session_state.pop("_goto", None)
+if _goto:
+    st.session_state["nav_group"] = _goto["group"]
+    st.session_state["nav_page"] = _goto["page"]
+    if _goto["sym_key"] != "hist_sym" or _goto["sym"] in SYMBOLS:
+        st.session_state[_goto["sym_key"]] = _goto["sym"]
+    if _goto["sym_key"] == "hist_sym":
+        st.session_state["hist_exch"] = "NSE stock"
+
 _grp = st.sidebar.radio("Menu", list(NAV.keys()), label_visibility="collapsed", key="nav_group")
 st.sidebar.caption(_grp.split(" ", 1)[1] if " " in _grp else _grp)
 PAGE = st.sidebar.radio("nav", NAV[_grp], label_visibility="collapsed", key="nav_page")
@@ -126,6 +142,8 @@ PAGE_TERMS = {
     "⚖️ Peer Compare": ("pe", "pb", "market_cap", "delivery_pct"),
     "🏆 Conviction": ("conviction_score", "accumulation", "delivery_pct", "smart_money"),
     "💼 Portfolio": ("market_cap", "pe", "dividend_yield"),
+    "🧮 Capital Allocator": ("conviction_score", "accumulation", "delivery_pct", "concall",
+                             "market_breadth"),
     "🚀 Movers": ("gap_up", "week52", "circuit", "volume", "turnover"),
     "🧭 Sectors": ("market_breadth", "pe", "momentum"),
     "💰 Smart Money": ("bulk_deal", "block_deal", "fii", "dii", "smart_money",
@@ -138,12 +156,173 @@ PAGE_TERMS = {
     "📦 Delivery & Value": ("delivery_pct", "turnover", "volume", "accumulation",
                             "daily_volatility", "var_margin", "pe"),
     "📞 Concalls": ("concall", "guidance", "standalone", "consolidated", "ebitda", "pat"),
+    "🧬 Concall Peers": ("concall", "guidance", "ebitda_margin", "revenue", "pat"),
+    "🥇 Best of Quarter": ("concall", "guidance", "pat", "ebitda_margin", "conviction_score"),
     "🗂️ Filings": ("corporate_action", "ex_date", "record_date", "bonus", "split",
                    "buyback", "rights_issue", "promoter_pledge"),
     "🩺 Data Health": ("snapshot", "bhavcopy"),
 }
 if PAGE in PAGE_TERMS:
     G.legend(*PAGE_TERMS[PAGE])
+
+
+def _nav_row(symbols: list[str], key_prefix: str, group: str = "📈 Markets",
+             page: str = "📈 History", sym_key: str = "hist_sym", limit: int = 5) -> None:
+    """Small button row under a box strip — click a symbol to jump to its History page."""
+    syms = list(dict.fromkeys(str(s) for s in symbols if s))[:limit]
+    if not syms:
+        return
+    cols = st.columns(len(syms))
+    for col, sym in zip(cols, syms):
+        with col:
+            if st.button(f"↗ {sym}", key=f"nav_{key_prefix}_{sym}", width="stretch"):
+                st.session_state["_goto"] = {"group": group, "page": page,
+                                             "sym_key": sym_key, "sym": sym.upper()}
+                st.rerun()
+
+
+def _dropout_note(page_key: str, today_symbols: list[str]) -> None:
+    d = SNAP.dropped_out(page_key, today_symbols)
+    if d and d[1]:
+        prev_date, gone = d
+        st.caption(f"📉 Dropped out of top-5 since {prev_date}: " + ", ".join(gone))
+
+
+def _conf_num(v) -> float | None:
+    """Confidence can be a 0-10 float/int, a digit string, or a HIGH/MEDIUM/LOW label."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        pass
+    return {"HIGH": 9.0, "MEDIUM": 6.0, "MED": 6.0, "LOW": 3.0}.get(str(v or "").strip().upper())
+
+
+_BQ_STOPWORDS = {"LIMITED", "LTD", "PVT", "PRIVATE", "THE", "CO"}
+
+
+def _company_key(name: str) -> str:
+    import re as _re0
+    toks = [t for t in _re0.sub(r"[^A-Z0-9 ]", " ", str(name or "").upper()).split()
+            if t not in _BQ_STOPWORDS]
+    return "".join(toks)
+
+
+# ================================================================ Top Ideas
+if PAGE == "⭐ Top Ideas":
+    st.caption("One screen, every page's top-5 — click a symbol to jump to its History page. "
+               "Each strip remembers yesterday's top-5 to flag who dropped out.")
+
+    def _ti_section(title: str, rows: list[tuple], fmt: str, suffix: str, page_key: str,
+                     nav_syms: list[str] | None = None) -> None:
+        with card():
+            st.markdown(f"#### {title}")
+            if not rows:
+                _hint()
+                return
+            SNAP.record(page_key, rows)
+            st.markdown(T.rank_boxes(rows, fmt, suffix), unsafe_allow_html=True)
+            _nav_row(nav_syms if nav_syms is not None else [s for s, *_ in rows], page_key)
+            _dropout_note(page_key, [s for s, *_ in rows])
+
+    _ti_data = _conv_data()
+    lb = S.rank_ideas(**_ti_data)
+    _ti_section("🏆 Conviction — top ideas", list(zip(lb["Symbol"].head(5), lb["Score"].head(5))),
+                "{:+d}", "", "conviction")
+
+    g = _num(load_snapshot_latest("top_gainers").copy(), ["perChange"])
+    if not g.empty and "symbol" in g.columns:
+        if "legend" in g.columns and "allSec" in g["legend"].values:
+            g = g[g["legend"] == "allSec"]
+        g = g.drop_duplicates(subset=["symbol"]).dropna(
+            subset=["perChange"]).sort_values("perChange", ascending=False)
+    _ti_section("🚀 Movers — top gainers",
+                list(zip(g["symbol"].head(5), g["perChange"].head(5))) if not g.empty else [],
+                "{:+.2f}", "%", "movers_gainers")
+
+    bhav = load_per_date("bhavcopy_delivery")
+    if not bhav.empty:
+        b = bhav.copy()
+        if "SERIES" in b.columns:
+            b = b[b["SERIES"] == "EQ"]
+        b = _num(b, ["CLOSE_PRICE", "PREV_CLOSE", "DELIV_PER", "TURNOVER_LACS"])
+        b["%Chg"] = (b["CLOSE_PRICE"] - b["PREV_CLOSE"]) / b["PREV_CLOSE"] * 100
+        scr = b[b["TURNOVER_LACS"].fillna(0) >= 200].sort_values("%Chg", ascending=False)
+        _ti_section("🔎 Screener — top scan hits", list(zip(scr["SYMBOL"].head(5), scr["%Chg"].head(5))),
+                    "{:+.2f}", "%", "screener")
+
+        dv = b[b["TURNOVER_LACS"].fillna(0) >= 500].sort_values("DELIV_PER", ascending=False)
+        _ti_section("📦 Delivery & Value — highest delivery %",
+                    list(zip(dv["SYMBOL"].head(5), dv["DELIV_PER"].head(5))), "{:.0f}", "%", "delivery_value")
+    else:
+        _ti_section("🔎 Screener — top scan hits", [], "{:+.2f}", "%", "screener")
+        _ti_section("📦 Delivery & Value — highest delivery %", [], "{:.0f}", "%", "delivery_value")
+
+    for label, name in [("💰 Smart Money — bulk deals, by value", "bulk_deals"),
+                        ("💰 Smart Money — block deals, by value", "block_deals")]:
+        df = load_growing(name)
+        rows = []
+        if not df.empty and {"QuantityTraded", "TradePrice/Wght.Avg.Price", "Symbol"} <= set(df.columns):
+            v = _num(df.copy(), ["QuantityTraded", "TradePrice/Wght.Avg.Price"])
+            v["Value(Cr)"] = (v["QuantityTraded"] * v["TradePrice/Wght.Avg.Price"]) / 1e7
+            v = v.sort_values("Value(Cr)", ascending=False).head(5)
+            rows = list(zip(v["Symbol"], v["Value(Cr)"]))
+        _ti_section(label, rows, "₹{:,.1f}", " Cr", f"smart_money_{name}")
+
+    mau = _num(load_snapshot_latest("most_active_underlying").copy(), ["totTurnover"])
+    rows = (list(zip(mau.sort_values("totTurnover", ascending=False)["symbol"].head(5),
+                     mau.sort_values("totTurnover", ascending=False)["totTurnover"].head(5)))
+            if not mau.empty and "symbol" in mau.columns else [])
+    _ti_section("📉 Derivatives & FII — most active underlying", rows, "₹{:,.0f}", " Cr", "derivatives_active")
+
+    fno = load_per_date("fno_bhavcopy")
+    rows = []
+    if not fno.empty and {"TckrSymb", "OpnIntrst"} <= set(fno.columns):
+        f = _num(fno.copy(), ["OpnIntrst"])
+        f["SYM"] = f["TckrSymb"].astype(str).str.upper()
+        rows = list(f.groupby("SYM")["OpnIntrst"].sum().nlargest(5).items())
+    _ti_section("🧩 F&O / Options — most active by OI", rows, "{:,.0f}", "", "fno_oi")
+
+    cqs = sorted(concall_quarters())
+    rows = []
+    if cqs:
+        peers = concall_peers(cqs[-1])
+        if not peers.empty and "Rev YoY %" in peers.columns:
+            p = peers.dropna(subset=["Rev YoY %"]).sort_values("Rev YoY %", ascending=False).head(5)
+            rows = list(zip(p["Symbol"], p["Rev YoY %"]))
+    _ti_section(f"🧬 Concall Peers — best reported growth ({cqs[-1] if cqs else '—'})",
+                rows, "{:+.1f}", "%", "concall_peers")
+
+    rqs = sorted(result_quarters())
+    rows, rq_nav = [], []
+    if rqs:
+        ridx = result_index(rqs[-1])
+        if not ridx.empty and "PAT YoY %" in ridx.columns:
+            r = ridx.dropna(subset=["PAT YoY %"]).sort_values("PAT YoY %", ascending=False).head(5)
+            rows = list(zip(r["Company"], r["PAT YoY %"]))
+            rq_nav = [s for s in (match_symbol(c) for c in r["Company"]) if s]
+    _ti_section(f"🧾 Result Scorecard — best PAT growth ({rqs[-1] if rqs else '—'})",
+                rows, "{:+.1f}", "%", "result_scorecard", nav_syms=rq_nav)
+
+    bqs = sorted(set(concall_quarters()) | set(result_quarters()))
+    rows, bq_nav = [], []
+    if bqs:
+        cidx, ridx = concall_index(bqs[-1]).copy(), result_index(bqs[-1]).copy()
+        if not cidx.empty or not ridx.empty:
+            cidx["_key"] = cidx["Company"].map(_company_key) if not cidx.empty else []
+            ridx["_key"] = ridx["Company"].map(_company_key) if not ridx.empty else []
+            merged = cidx.merge(ridx, on="_key", how="outer", suffixes=("_cc", "_res")) \
+                if not cidx.empty and not ridx.empty else pd.DataFrame()
+            if not merged.empty:
+                merged["Company"] = merged["Company_cc"].fillna(merged["Company_res"])
+                good = ((merged["Call"].isin(["BUY"])) | (merged["Verdict_cc"] == "GOOD")) & \
+                       (merged["Verdict_res"] == "GOOD")
+                best = merged[good].copy()
+                best["PAT YoY %"] = pd.to_numeric(best["PAT YoY %"], errors="coerce")
+                best = best.dropna(subset=["PAT YoY %"]).sort_values("PAT YoY %", ascending=False).head(5)
+                rows = list(zip(best["Company"], best["PAT YoY %"]))
+                bq_nav = [s for s in (match_symbol(c) for c in best["Company"]) if s]
+    _ti_section(f"🥇 Best of Quarter — concall + result both GOOD ({bqs[-1] if bqs else '—'})",
+                rows, "{:+.1f}", "%", "best_of_quarter", nav_syms=bq_nav)
 
 # ================================================================ Market Pulse
 if PAGE == "📊 Market Pulse":
@@ -257,11 +436,39 @@ if PAGE == "🏆 Conviction":
         ]), unsafe_allow_html=True)
         with card():
             st.markdown(G.head("Full conviction leaderboard", "conviction_score"), unsafe_allow_html=True)
+            top5_rows = list(zip(lb["Symbol"].head(5), lb["Score"].head(5)))
+            SNAP.record("conviction", top5_rows)
+            st.markdown(T.rank_boxes(top5_rows, "{:+d}"), unsafe_allow_html=True)
+            _nav_row([s for s, _ in top5_rows], "conviction")
+            _dropout_note("conviction", [s for s, _ in top5_rows])
             lb = searched(lb, "conv_q", ["Symbol"], "Search", "symbol")
             st.dataframe(
                 lb.style.background_gradient(subset=["Score"], cmap="RdYlGn")
                         .format({"Score": "{:+d}", "Deliv%": "{:.0f}", "%Chg": "{:+.2f}"}, na_rep="-"),
                 width="stretch", height=560, hide_index=True)
+
+        prev = SNAP.previous_entry("conviction")
+        if prev:
+            prev_date, prev_rows = prev
+            with card():
+                st.markdown(f"#### 🔁 Backtest — {prev_date}'s top-5 picks")
+                bt_rows = []
+                for sym, score in prev_rows:
+                    h = symbol_history(sym)
+                    if h.empty:
+                        continue
+                    h = h[h["date"] >= prev_date]
+                    if h.empty or not h.iloc[0]["CLOSE_PRICE"]:
+                        continue
+                    entry, last = h.iloc[0]["CLOSE_PRICE"], h.iloc[-1]["CLOSE_PRICE"]
+                    bt_rows.append((sym, (last - entry) / entry * 100))
+                if bt_rows:
+                    avg = sum(v for _, v in bt_rows) / len(bt_rows)
+                    st.markdown(T.rank_boxes(bt_rows, "{:+.2f}", "%"), unsafe_allow_html=True)
+                    st.caption(f"Return since {prev_date} close → latest close. "
+                               f"Avg: {avg:+.2f}%. Educational backtest, not advice.")
+                else:
+                    _hint("No price history yet for those picks since then.")
 
 
 if PAGE == "📊 Market Pulse":
@@ -329,40 +536,268 @@ if PAGE == "📡 What's New":
 
 # ================================================================ Portfolio
 if PAGE == "💼 Portfolio":
-    st.caption("Paste your holdings → live P&L + conviction + risk for each. "
-               "Format per line: SYMBOL QTY AVGCOST (e.g. RELIANCE 50 2450)")
-    txt = st.text_area("Holdings", height=140, key="pf_txt",
-                       placeholder="RELIANCE 50 2450\nTCS 20 3600\nCARYSIL 100 820")
-    if txt.strip():
-        hold = I.parse_holdings(txt)
-        if hold.empty:
-            _hint("Couldn't parse — use: SYMBOL QTY AVGCOST per line.")
+    st.caption("Your tracked holdings — persist across sessions. Live LTP, daily move, P&L, "
+               "plus the latest concall and result verdict per stock.")
+
+    ac1, ac2, ac3, ac4 = st.columns([2, 1, 1, 1])
+    with ac1:
+        add_sym = symbol_select("Add company", key="pf_add_sym")
+    with ac2:
+        add_qty = st.number_input("Qty", min_value=0.0, value=0.0, step=1.0, key="pf_add_qty")
+    with ac3:
+        add_cost = st.number_input("Avg cost", min_value=0.0, value=0.0, step=1.0, key="pf_add_cost")
+    with ac4:
+        st.markdown("&nbsp;", unsafe_allow_html=True)
+        if st.button("➕ Add", key="pf_add_btn", width="stretch") and add_sym and add_qty > 0:
+            PF.add(add_sym, add_qty, add_cost)
+            st.rerun()
+
+    holdings = PF.load()
+    if not holdings:
+        st.info("No holdings yet — add a company above to start tracking your portfolio.")
+    else:
+        hold_df = pd.DataFrame(holdings)
+        d = _conv_data()
+        scorer = lambda s: S.stock_scorecard(s, **d)
+        px = I.portfolio_xray(hold_df, d["bhav"], scorer)
+
+        bhav = _num(d["bhav"].copy(), ["CLOSE_PRICE", "PREV_CLOSE"])
+        if "SERIES" in bhav.columns:
+            bhav = bhav[bhav["SERIES"] == "EQ"]
+        chg_map = {}
+        if "SYMBOL" in bhav.columns:
+            for _, r in bhav.iterrows():
+                s = str(r["SYMBOL"]).upper()
+                if (s not in chg_map and pd.notna(r["CLOSE_PRICE"])
+                        and pd.notna(r["PREV_CLOSE"]) and r["PREV_CLOSE"]):
+                    chg_map[s] = (r["CLOSE_PRICE"] - r["PREV_CLOSE"]) / r["PREV_CLOSE"] * 100
+
+        # latest concall + result, reverse-matched by symbol (same pattern as Capital Allocator)
+        cqs, rqs = sorted(concall_quarters()), sorted(result_quarters())
+        latest_cq, latest_rq = (cqs[-1] if cqs else None), (rqs[-1] if rqs else None)
+        concall_map, result_map = {}, {}
+        if latest_cq:
+            for _, r in concall_index(latest_cq).iterrows():
+                sym = match_symbol(r["Company"])
+                if sym and sym not in concall_map:
+                    concall_map[sym] = r
+        if latest_rq:
+            for _, r in result_index(latest_rq).iterrows():
+                sym = match_symbol(r["Company"])
+                if sym and sym not in result_map:
+                    result_map[sym] = r
+
+        px["%Chg"] = px["Symbol"].map(chg_map)
+        px["Concall Verdict"] = px["Symbol"].apply(
+            lambda s: concall_map[s]["Call"] if s in concall_map else "—")
+        px["Concall Score"] = px["Symbol"].apply(
+            lambda s: _conf_num(concall_map[s]["Confidence"]) if s in concall_map else None)
+        px["Result Verdict"] = px["Symbol"].apply(
+            lambda s: result_map[s]["Verdict"] if s in result_map else "—")
+        px["Result Score"] = px["Symbol"].apply(
+            lambda s: result_map[s]["PAT YoY %"] if s in result_map else None)
+        px["Concall Score"] = pd.to_numeric(px["Concall Score"], errors="coerce")
+        px["Result Score"] = pd.to_numeric(px["Result Score"], errors="coerce")
+
+        inv = px["Invested"].dropna().sum()
+        cur = px["Current"].dropna().sum()
+        pnl = cur - inv
+        st.markdown(T.stat_row([
+            T.stat_card("Invested", f'₹{inv:,.0f}', f'{len(px)} holdings', "neutral"),
+            T.stat_card("Current", f'₹{cur:,.0f}', "market value", "neutral"),
+            T.stat_card("P&L", f'₹{pnl:,.0f}', f'{(pnl/inv*100 if inv else 0):+.1f}%',
+                        "up" if pnl >= 0 else "down", arrow=True),
+            T.stat_card("Avg conviction", f'{px["Conviction"].dropna().mean():+.1f}'
+                        if px["Conviction"].notna().any() else "—", "signal", "neutral"),
+        ]), unsafe_allow_html=True)
+
+        with card():
+            st.markdown(G.head("Holdings", "market_cap", "pe", "concall"), unsafe_allow_html=True)
+            st.caption(f"Concall: {latest_cq or '—'} · Result: {latest_rq or '—'}. "
+                       "Edit qty / avg cost inline — saved automatically.")
+            editable = px[["Symbol", "Qty", "AvgCost"]].copy()
+            edited = st.data_editor(
+                editable, key="pf_editor", hide_index=True, width="stretch", num_rows="fixed",
+                column_config={
+                    "Symbol": st.column_config.TextColumn("Symbol", disabled=True),
+                    "Qty": st.column_config.NumberColumn("Qty", min_value=0.0, step=1.0),
+                    "AvgCost": st.column_config.NumberColumn("Avg Cost", min_value=0.0,
+                                                             step=0.01, format="%.2f"),
+                })
+
+            def _norm(df):
+                return [(r["Symbol"], float(r["Qty"]) if pd.notna(r["Qty"]) else None,
+                        float(r["AvgCost"]) if pd.notna(r["AvgCost"]) else None)
+                        for r in df.to_dict("records")]
+
+            if _norm(edited) != _norm(editable):
+                PF.save(edited.to_dict("records"))
+                st.rerun()
+
+            show = px[["Symbol", "Qty", "AvgCost", "LTP", "%Chg", "Invested", "Current", "P&L",
+                      "P&L%", "Conviction", "Concall Verdict", "Concall Score",
+                      "Result Verdict", "Result Score"]].copy()
+            # Streamlit's grid renders a null numeric cell as the literal text "None",
+            # ignoring Styler na_rep — format these two as plain "-"-safe strings instead.
+            show["Concall Score"] = show["Concall Score"].apply(
+                lambda v: f"{v:.0f}" if pd.notna(v) else "—")
+            show["Result Score"] = show["Result Score"].apply(
+                lambda v: f"{v:+.1f}" if pd.notna(v) else "—")
+            st.dataframe(
+                show.style.background_gradient(subset=["P&L%"], cmap="RdYlGn")
+                    .background_gradient(subset=["%Chg"], cmap="RdYlGn")
+                    .background_gradient(subset=["Conviction"], cmap="RdYlGn")
+                    .format({"AvgCost": "{:,.2f}", "LTP": "{:,.2f}", "%Chg": "{:+.2f}",
+                             "Invested": "{:,.0f}", "Current": "{:,.0f}", "P&L": "{:,.0f}",
+                             "P&L%": "{:+.1f}", "Conviction": "{:+.0f}"}, na_rep="-"),
+                width="stretch", height=420, hide_index=True)
+
+            rem = st.selectbox("Remove a holding", ["—"] + px["Symbol"].tolist(), key="pf_rem")
+            if st.button("🗑️ Remove", key="pf_rem_btn") and rem != "—":
+                PF.remove(rem)
+                st.rerun()
+
+        st.caption("Conviction = live technical signal. Concall/Result verdict + score come from "
+                   "the latest collected quarter — cross-check before acting. Not investment advice.")
+
+
+# ================================================================ Capital Allocator
+if PAGE == "🧮 Capital Allocator":
+    st.caption("⚠️ Educational decision-support from public NSE data — not investment advice. "
+               "Composite of today's technical conviction + the latest concall verdict + the "
+               "latest result verdict. Only stocks with a positive composite and no fundamental "
+               "red flag are included — basket size varies day to day with opportunity quality. "
+               "Verify every pick yourself before acting.")
+
+    amount = st.number_input("Amount to invest this month (₹)", min_value=0, value=100_000,
+                             step=5_000, key="cap_amount")
+
+    d = _conv_data()
+    ideas = S.rank_ideas(**d)
+    if ideas.empty:
+        _hint("Needs bhav copy for the latest trading day — fetch/backfill first.")
+    else:
+        bqs = sorted(set(concall_quarters()) | set(result_quarters()))
+        cap_q = st.selectbox("Fundamentals quarter (concall + result)",
+                             list(reversed(bqs)) or ["(none collected)"], key="cap_q")
+
+        cidx = concall_index(cap_q) if cap_q in concall_quarters() else pd.DataFrame()
+        ridx = result_index(cap_q) if cap_q in result_quarters() else pd.DataFrame()
+        concall_map, result_map = {}, {}
+        for _, r in cidx.iterrows():
+            sym = match_symbol(r["Company"])
+            if sym and sym not in concall_map:
+                concall_map[sym] = r
+        for _, r in ridx.iterrows():
+            sym = match_symbol(r["Company"])
+            if sym and sym not in result_map:
+                result_map[sym] = r
+
+        bhav = _num(d["bhav"].copy(), ["CLOSE_PRICE"])
+        if "SERIES" in bhav.columns:
+            bhav = bhav[bhav["SERIES"] == "EQ"]
+        close_map = {}
+        if "SYMBOL" in bhav.columns:
+            for _, r in bhav.iterrows():
+                s = str(r["SYMBOL"]).upper()
+                if s not in close_map:
+                    close_map[s] = r["CLOSE_PRICE"]
+
+        candidates = []
+        for _, row in ideas.iterrows():
+            sym = str(row["Symbol"]).upper()
+            composite = float(row["Score"])
+            tags, excluded = [], False
+            cc = concall_map.get(sym)
+            if cc is not None:
+                call = str(cc["Call"] or "").upper()
+                if call in ("BUY", "ACCUMULATE ON DIPS"):
+                    composite += 3
+                    tags.append("concall BUY")
+                elif call in ("AVOID", "SELL"):
+                    composite -= 5
+                    excluded = True
+                    tags.append("concall AVOID/SELL")
+                cn = _conf_num(cc["Confidence"])
+                if cn is not None:
+                    composite += (cn - 5) / 2
+            rr = result_map.get(sym)
+            if rr is not None:
+                verdict = str(rr["Verdict"] or "").upper()
+                if verdict == "GOOD":
+                    composite += 3
+                    tags.append("result GOOD")
+                elif verdict == "BAD":
+                    composite -= 5
+                    excluded = True
+                    tags.append("result BAD")
+            if cc is not None and rr is not None and "concall BUY" in tags and "result GOOD" in tags:
+                composite += 2
+                tags.append("both confirmed")
+            candidates.append({"Symbol": sym, "Composite": composite, "Tags": ", ".join(tags) or "—",
+                               "Excluded": excluded, "LTP": close_map.get(sym),
+                               "Concall": cc["Call"] if cc is not None else "—",
+                               "Result": rr["Verdict"] if rr is not None else "—"})
+
+        MIN_N, MAX_N = 3, 10
+        picks, used_th = [], None
+        for th in (5, 4, 3, 2, 1, 0):
+            pool = sorted((c for c in candidates if not c["Excluded"] and c["Composite"] >= th),
+                         key=lambda c: -c["Composite"])
+            if len(pool) >= MIN_N or (th == 0 and pool):
+                picks, used_th = pool[:MAX_N], th
+                break
+        if not picks:
+            pool = sorted((c for c in candidates if not c["Excluded"]), key=lambda c: -c["Composite"])
+            picks, used_th = pool[:MIN_N], "n/a"
+
+        idx = load_snapshot_latest("all_indices")
+        ad = load_snapshot_latest("advances_declines")
+        reg = S.market_regime(idx, ad)
+
+        if not picks:
+            _hint("No stock clears a basic quality bar today — every accumulation candidate "
+                  "carries a concall/result red flag, or no fundamental data exists at all. "
+                  "Market regime: " + reg["label"])
         else:
-            d = _conv_data()
-            scorer = lambda s: S.stock_scorecard(s, **d)
-            px = I.portfolio_xray(hold, d["bhav"], scorer)
-            inv = px["Invested"].dropna().sum()
-            cur = px["Current"].dropna().sum()
-            pnl = cur - inv
+            min_c = min(p["Composite"] for p in picks)
+            shift = max(1.0, 1.0 - min_c)
+            weights = [p["Composite"] + shift for p in picks]
+            total_w = sum(weights)
+            for p, w in zip(picks, weights):
+                p["Weight %"] = w / total_w * 100
+                p["Allocated ₹"] = amount * w / total_w
+                p["Shares"] = int(p["Allocated ₹"] // p["LTP"]) if p["LTP"] else 0
+                p["Deployed ₹"] = p["Shares"] * (p["LTP"] or 0)
+            deployed = sum(p["Deployed ₹"] for p in picks)
+            leftover = amount - deployed
+
             st.markdown(T.stat_row([
-                T.stat_card("Invested", f'₹{inv:,.0f}', f'{len(px)} holdings', "neutral"),
-                T.stat_card("Current", f'₹{cur:,.0f}', "market value", "neutral"),
-                T.stat_card("P&L", f'₹{pnl:,.0f}', f'{(pnl/inv*100 if inv else 0):+.1f}%',
-                            "up" if pnl >= 0 else "down", arrow=True),
-                T.stat_card("Avg conviction", f'{px["Conviction"].dropna().mean():+.1f}'
-                            if px["Conviction"].notna().any() else "—", "signal", "neutral"),
+                T.stat_card("Market regime", reg["label"], f"score {reg['score']:+d}", reg["tone"]),
+                T.stat_card("Picks", f"{len(picks)}", f"quality bar ≥ {used_th}", "up"),
+                T.stat_card("Deployed", f"₹{deployed:,.0f}", f"of ₹{amount:,.0f}", "neutral"),
+                T.stat_card("Cash left", f"₹{leftover:,.0f}", "rounding to whole shares", "neutral"),
             ]), unsafe_allow_html=True)
+
             with card():
-                st.markdown(G.head("Holdings X-ray", "market_cap", "pe"), unsafe_allow_html=True)
-                px = searched(px, "pf_q", ["Symbol"], "Search", "symbol")
+                st.markdown(G.head("Suggested allocation", "conviction_score", "concall"),
+                            unsafe_allow_html=True)
+                top5_rows = [(p["Symbol"], p["Allocated ₹"]) for p in picks[:5]]
+                SNAP.record("capital_allocator", top5_rows)
+                st.markdown(T.rank_boxes(top5_rows, "₹{:,.0f}"), unsafe_allow_html=True)
+                _nav_row([p["Symbol"] for p in picks], "cap_alloc", limit=len(picks))
+                _dropout_note("capital_allocator", [p["Symbol"] for p in picks[:5]])
+
+                pdf = pd.DataFrame(picks)[["Symbol", "Composite", "Weight %", "Allocated ₹",
+                                          "LTP", "Shares", "Deployed ₹", "Concall", "Result", "Tags"]]
                 st.dataframe(
-                    px.style.background_gradient(subset=["P&L%"], cmap="RdYlGn")
-                      .background_gradient(subset=["Conviction"], cmap="RdYlGn")
-                      .format({"AvgCost": "{:,.2f}", "LTP": "{:,.2f}", "Invested": "{:,.0f}",
-                               "Current": "{:,.0f}", "P&L": "{:,.0f}", "P&L%": "{:+.1f}",
-                               "Conviction": "{:+.0f}"}, na_rep="-"),
-                    width="stretch", height=420, hide_index=True)
-            st.caption("Conviction = live signal score; cross-check verdict before acting.")
+                    pdf.style.background_gradient(subset=["Composite"], cmap="RdYlGn")
+                       .format({"Composite": "{:+.1f}", "Weight %": "{:.1f}", "Allocated ₹": "{:,.0f}",
+                                "LTP": "{:,.2f}", "Deployed ₹": "{:,.0f}"}, na_rep="-"),
+                    width="stretch", hide_index=True)
+                st.caption("Composite = conviction score (delivery/volume/price/flows) + concall "
+                           "verdict + result verdict + confidence, where available. Stocks with no "
+                           "concall/result on file are scored on conviction alone — flagged '—'.")
 
 
 # ================================================================ Signals
@@ -473,6 +908,11 @@ if PAGE == "🎯 Signals":
                    "Cross-check with the market regime above before acting.")
         ideas = S.rank_ideas(**_sig_data)
         if not ideas.empty:
+            top5_rows = list(zip(ideas["Symbol"].head(5), ideas["Score"].head(5)))
+            SNAP.record("conviction", top5_rows)
+            st.markdown(T.rank_boxes(top5_rows, "{:+d}"), unsafe_allow_html=True)
+            _nav_row([s for s, _ in top5_rows], "signals")
+            _dropout_note("conviction", [s for s, _ in top5_rows])
             st.dataframe(
                 ideas.style.background_gradient(subset=["Score"], cmap="RdYlGn")
                            .format({"Score": "{:+d}", "Deliv%": "{:.0f}", "%Chg": "{:+.2f}"}, na_rep="-"),
@@ -517,29 +957,51 @@ if PAGE == "📞 Concalls":
     else:
         q = st.selectbox("Quarter", list(reversed(qs)), key="cc_q")
         idx = concall_index(q)
+        cdoc = concall_summary(q)
         if idx.empty:
             _hint("No concalls parsed for this quarter.")
         else:
-            buy = int((idx["Call"] == "BUY").sum())
-            hold = int(idx["Call"].isin(["HOLD"]).sum())
+            buy = int(idx["Call"].isin(["BUY", "ACCUMULATE ON DIPS"]).sum())
+            hold = int(idx["Call"].isin(["HOLD", "WATCHLIST"]).sum())
             avoid = int(idx["Call"].isin(["AVOID", "SELL"]).sum())
             conf = pd.to_numeric(idx["Confidence"], errors="coerce")
+            conf_disp = (f"{conf.mean():.1f}/10" if conf.notna().any() else
+                         idx["Confidence"].mode().iat[0].title() if idx["Confidence"].any() else "—")
             st.markdown(T.stat_row([
                 T.stat_card("Companies", f"{len(idx)}", q, "neutral"),
-                T.stat_card("BUY", f"{buy}", "bullish verdicts", "up"),
-                T.stat_card("HOLD / AVOID", f"{hold} / {avoid}", "cautious", "down"),
-                T.stat_card("Avg confidence", f"{conf.mean():.1f}/10" if conf.notna().any() else "—",
-                            "mgmt tone", "neutral"),
+                T.stat_card("BUY / ACCUMULATE", f"{buy}", "bullish verdicts", "up"),
+                T.stat_card("HOLD / WATCH / AVOID", f"{hold} / {avoid}", "cautious", "down"),
+                T.stat_card("Confidence", conf_disp, "mgmt tone", "neutral"),
             ]), unsafe_allow_html=True)
             if len(idx):
                 _bs = buy / len(idx) * 100
-                st.markdown(T.progress(_bs, "success", f"BUY verdicts · {_bs:.0f}%"),
+                st.markdown(T.progress(_bs, "success", f"BUY / ACCUMULATE verdicts · {_bs:.0f}%"),
                             unsafe_allow_html=True)
+            if cdoc.get("last_updated"):
+                st.caption(f"`concalls-summary.json` last written on "
+                           f"{str(cdoc['last_updated']).replace('T', ' ')}.")
+
+            with card():
+                st.markdown(G.head("🔝 Top 10 concalls this quarter", "concall", "guidance"),
+                            unsafe_allow_html=True)
+                st.caption("Ranked by management confidence as read from the call.")
+                ranked = idx.assign(_conf=idx["Confidence"].map(_conf_num)) \
+                            .dropna(subset=["_conf"]).sort_values("_conf", ascending=False).head(10)
+                if ranked.empty:
+                    _hint("No confidence score recorded for this quarter's concalls.")
+                else:
+                    top10_rows = list(zip(ranked["Company"], ranked["_conf"], ranked["Call"]))
+                    SNAP.record("concalls_top", list(zip(ranked["Company"], ranked["_conf"])))
+                    st.markdown(T.rank_boxes(top10_rows, "{:.0f}", "/10"), unsafe_allow_html=True)
+                    nav_syms = [s for s in (match_symbol(c) for c in ranked["Company"]) if s]
+                    _nav_row(nav_syms, "concalls_top", limit=10)
+                    _dropout_note("concalls_top", list(ranked["Company"]))
 
             with card():
                 st.markdown(G.head("All concalls", "concall", "guidance"), unsafe_allow_html=True)
                 colf1, colf2 = st.columns([1, 2])
-                vf = colf1.selectbox("Filter call", ["All", "BUY", "HOLD", "AVOID/SELL"], key="cc_vf")
+                vf = colf1.selectbox("Filter call", ["All", "BUY", "ACCUMULATE ON DIPS", "HOLD",
+                                                     "WATCHLIST", "AVOID/SELL"], key="cc_vf")
                 q_txt = colf2.text_input("Search company", key="cc_search").upper()
                 view = idx.copy()
                 if vf == "AVOID/SELL":
@@ -555,13 +1017,15 @@ if PAGE == "📞 Concalls":
                 st.markdown("#### Read analysis")
                 comp = st.selectbox("Company", idx["Company"].tolist(), key="cc_read")
                 row = idx[idx["Company"] == comp].iloc[0]
-                tone = {"BUY": "up", "GOOD": "up"}.get(row["Call"] or row["Verdict"], None)
-                tone = "up" if row["Call"] == "BUY" or row["Verdict"] == "GOOD" else (
+                tone = "up" if row["Call"] in ("BUY", "ACCUMULATE ON DIPS") or row["Verdict"] == "GOOD" else (
                     "down" if row["Call"] in ("AVOID", "SELL") or row["Verdict"] == "BAD" else "neutral")
+                conf_val = row["Confidence"] or "—"
+                conf_num = _conf_num(conf_val)
+                conf_lbl = f"conf {conf_num:.0f}/10" if conf_num is not None else f"confidence: {conf_val.title()}"
                 badges = "".join([
                     T.badge(row["Verdict"] or "—", tone) + " ",
                     T.badge(row["Call"] or "—", tone) + " ",
-                    T.badge(f"conf {row['Confidence'] or '?'}/10", "neutral"),
+                    T.badge(conf_lbl, "neutral"),
                 ])
                 st.markdown(badges, unsafe_allow_html=True)
 
@@ -578,6 +1042,228 @@ if PAGE == "📞 Concalls":
                     st.caption("Fundamentals (concall) + technicals/flows (signal) — cross-check both.")
                 st.markdown("---")
                 st.markdown(concall_text(q, row["_file"]))
+
+# ================================================================ Concall Peers
+if PAGE == "🧬 Concall Peers":
+    st.caption("Groups a quarter's concalls by NSE industry, then reads each peer's call "
+               "verdict next to the numbers it actually reported for that quarter.")
+
+    def _pc(v, suffix="%"):
+        return "—" if pd.isna(v) else f"{v:+.1f}{suffix}"
+
+    pqs = concall_quarters()
+    if not pqs:
+        _hint("No concall data — add MD files under concall-data/<quarter>/.")
+    else:
+        pq = st.selectbox("Quarter", list(reversed(pqs)), key="peer_q")
+        peers = concall_peers(pq)
+        if peers.empty:
+            _hint(f"No concalls parsed for {pq}.")
+        else:
+            counts = peers["Industry"].value_counts()
+            groups = [i for i in counts.index if i != "Unclassified" and counts[i] >= 2]
+            tagged = int(peers["Industry"].ne("Unclassified").sum())
+            if not groups:
+                _hint("No industry has two or more tagged concalls this quarter — industry "
+                      "tags come from corporate announcements, so coverage is partial.")
+            else:
+                ind = st.selectbox("Industry", groups, key="peer_ind",
+                                   format_func=lambda i: f"{i} ({counts[i]})")
+                g = peers[peers["Industry"] == ind]
+                # EBITDA margin on a bank means nothing — swap the column for lenders
+                lender = ratio_family(ind) == "lender"
+                bull = int(g["Call"].str.upper()
+                           .str.contains("GOOD|BUY|ACCUMULATE", na=False).sum())
+                priced = int(g["Rev YoY %"].notna().sum())
+                st.markdown(T.stat_row([
+                    T.stat_card("Peers on the call", f"{len(g)}", f"{ind} · {pq}", "neutral"),
+                    T.stat_card("Bullish calls", f"{bull}/{len(g)}", "GOOD, BUY or accumulate",
+                                "up" if bull * 2 >= len(g) else "neutral"),
+                    T.stat_card("Median rev YoY", _pc(g["Rev YoY %"].median()),
+                                f"{priced} of {len(g)} peers have a result", "neutral"),
+                    T.stat_card("Median PAT YoY" if lender else "Median EBITDA margin",
+                                _pc(g["PAT YoY %"].median() if lender else g["Margin %"].median()),
+                                "reported for the quarter", "neutral"),
+                ]), unsafe_allow_html=True)
+
+                with card():
+                    st.markdown(G.head(f"{ind} — what they said vs what they reported",
+                                       "concall", "guidance", "ebitda_margin"),
+                                unsafe_allow_html=True)
+                    cols = ["Company", "Symbol", "Sub-industry", "Call", "Confidence",
+                            "Result verdict", "Grade", "Rev YoY %", "PAT YoY %"]
+                    if not lender:
+                        cols[-1:-1] = ["Margin %", "Margin bps"]
+                    gv = g[cols].sort_values("Rev YoY %", ascending=False, na_position="last")
+                    top5 = gv.dropna(subset=["Rev YoY %"]).head(5)
+                    if not top5.empty:
+                        top5_rows = list(zip(top5["Symbol"], top5["Rev YoY %"]))
+                        SNAP.record("concall_peers", top5_rows)
+                        st.markdown(T.rank_boxes(top5_rows, "{:+.1f}", "%"), unsafe_allow_html=True)
+                        _nav_row([s for s, _ in top5_rows], "peers")
+                        _dropout_note("concall_peers", [s for s, _ in top5_rows])
+                    st.dataframe(gv, width="stretch", height=360, hide_index=True)
+                    st.caption(
+                        f"{tagged} of {len(peers)} concalls this quarter carry an industry tag. "
+                        "Tags come from corporate announcements, so a company that filed nothing "
+                        "stays untagged and sits out of every peer group. Blank numbers mean no "
+                        "analyzed result PDF for that company — run it on 📄 Result PDFs."
+                        + (" Margin columns are dropped for lenders — EBITDA margin doesn't "
+                           "apply to a bank's P&L." if lender else ""))
+
+                with card():
+                    st.markdown(G.head(f"Ratios {ind.lower()} is read on", "ebitda_margin", "pat"),
+                                unsafe_allow_html=True)
+                    st.markdown(
+                        " ".join(T.badge(label, "neutral")
+                                 for label, _ in industry_ratios(ind)),
+                        unsafe_allow_html=True)
+                    st.markdown("")
+                    st.dataframe(ratio_hits(pq, ind, tuple(g["Company"])),
+                                 width="stretch", height=300, hide_index=True)
+                    st.caption(
+                        "A ✓ means that ratio came up in the company's own concall highlights or "
+                        "key monitorables. A blank means the analysis never recorded it — not "
+                        "proof management stayed silent. Ratio set is fixed per industry family "
+                        f"({ratio_family(ind)}), so peers are read on the same yardsticks.")
+
+# ================================================================ Guidance Tracker
+if PAGE == "📜 Guidance Tracker":
+    st.caption("What management said last quarter (and same quarter last year, when available) "
+               "next to what's on record now. Side-by-side — no auto-verdict, you judge.")
+
+    def _gt_parse_q(label: str):
+        import re as _re3
+        m = _re3.match(r"Q(\d)FY(\d+)", label or "")
+        return (int(m.group(1)), int(m.group(2))) if m else None
+
+    def _gt_prev_q(label: str) -> str | None:
+        p = _gt_parse_q(label)
+        if not p:
+            return None
+        q, fy = p
+        return f"Q4FY{fy - 1}" if q == 1 else f"Q{q - 1}FY{fy}"
+
+    def _gt_yoy_q(label: str) -> str | None:
+        p = _gt_parse_q(label)
+        if not p:
+            return None
+        q, fy = p
+        return f"Q{q}FY{fy - 1}"
+
+    def _gt_highlights(quarter_label: str | None, key: str) -> list:
+        if not quarter_label:
+            return []
+        for r in (concall_summary(quarter_label).get("concalls") or []):
+            if _company_key(r.get("company") or "") == key:
+                return r.get("highlights") or []
+        return []
+
+    cqs = concall_quarters()
+    if not cqs:
+        _hint("No concall data — add MD files under concall-data/<quarter>/.")
+    else:
+        cq = st.selectbox("Quarter", list(reversed(cqs)), key="gt_q")
+        cur_idx = concall_index(cq)
+        if cur_idx.empty:
+            _hint(f"No concalls parsed for {cq}.")
+        else:
+            comp = st.selectbox("Company", sorted(cur_idx["Company"].unique()), key="gt_comp")
+            cur_key = _company_key(comp)
+            prev_label, yoy_label = _gt_prev_q(cq), _gt_yoy_q(cq)
+            prev_available = bool(prev_label and prev_label in cqs)
+            yoy_available = bool(yoy_label and yoy_label in cqs)
+
+            st.markdown(T.stat_row([
+                T.stat_card("This quarter", cq, "selected", "neutral"),
+                T.stat_card("Last quarter", prev_label or "—",
+                            "data found" if prev_available else "not collected",
+                            "up" if prev_available else "neutral"),
+                T.stat_card("Same qtr last year", yoy_label or "—",
+                            "data found" if yoy_available else "not collected",
+                            "up" if yoy_available else "neutral"),
+            ]), unsafe_allow_html=True)
+
+            cur_hl = _gt_highlights(cq, cur_key)
+            prev_hl = _gt_highlights(prev_label, cur_key) if prev_available else []
+            yoy_hl = _gt_highlights(yoy_label, cur_key) if yoy_available else []
+
+            def _render_quarter(quarter_label: str, hl: list) -> None:
+                if hl:
+                    for h in hl:
+                        pt = h.get("point") if isinstance(h, dict) else str(h)
+                        sent = h.get("sentiment") if isinstance(h, dict) else None
+                        icon = {"good": "🟢", "bad": "🔴"}.get(sent, "⚪")
+                        st.markdown(f"{icon} {pt}")
+                    return
+                # older quarters' concalls-summary.json predates structured highlights —
+                # fall back to verdict/call/confidence so the column isn't just blank
+                pidx = concall_index(quarter_label)
+                row = (pidx[pidx["Company"].map(_company_key) == cur_key]
+                       if not pidx.empty else pd.DataFrame())
+                if row.empty:
+                    _hint("No highlights recorded.")
+                    return
+                r = row.iloc[0]
+                st.markdown(T.badge(r["Verdict"] or "—", "neutral") + " " +
+                            T.badge(r["Call"] or "—", "neutral") + " " +
+                            T.badge(f"confidence {r['Confidence']}" if r["Confidence"] else "—",
+                                    "neutral"), unsafe_allow_html=True)
+                st.caption("No point-by-point highlights for this quarter — verdict/call only.")
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                with card():
+                    st.markdown(f"#### 🕐 Said in {prev_label or 'last quarter'}")
+                    if not prev_available:
+                        _hint("Not available — no concall collected for that quarter.")
+                    else:
+                        _render_quarter(prev_label, prev_hl)
+            with c2:
+                with card():
+                    st.markdown(f"#### 📅 Said in {yoy_label or 'same qtr last year'}")
+                    if not yoy_available:
+                        _hint("Not available — no concall collected for that quarter.")
+                    else:
+                        _render_quarter(yoy_label, yoy_hl)
+            with c3:
+                with card():
+                    st.markdown(f"#### ✅ On record now — {cq}")
+                    _render_quarter(cq, cur_hl)
+
+            ridx = result_index(cq)
+            ractual = pd.Series(dtype=object)
+            if not ridx.empty:
+                m = ridx[ridx["Company"].map(_company_key) == cur_key]
+                if not m.empty:
+                    ractual = m.iloc[0]
+
+            with card():
+                st.markdown(f"#### 📊 Actuals this quarter — {cq}")
+                if ractual.empty:
+                    _hint("No parsed result PDF for this company/quarter — "
+                          "run it on 📄 Result PDFs to populate actuals.")
+                else:
+                    actuals = pd.DataFrame([
+                        {"Metric": "Revenue (Cr)", "Current": ractual.get("Rev Cr"),
+                         "YoY %": ractual.get("Rev YoY %"), "QoQ %": ractual.get("Rev QoQ %")},
+                        {"Metric": "EBITDA (Cr)", "Current": ractual.get("EBITDA Cr"),
+                         "YoY %": ractual.get("EBITDA YoY %"), "QoQ %": None},
+                        {"Metric": "EBITDA Margin %", "Current": ractual.get("Margin %"),
+                         "YoY %": None, "QoQ %": None},
+                        {"Metric": "PAT (Cr)", "Current": ractual.get("PAT Cr"),
+                         "YoY %": ractual.get("PAT YoY %"), "QoQ %": ractual.get("PAT QoQ %")},
+                    ])
+                    st.dataframe(
+                        actuals.style.format({"Current": "{:,.1f}", "YoY %": "{:+.1f}",
+                                              "QoQ %": "{:+.1f}"}, na_rep="—"),
+                        width="stretch", hide_index=True)
+                    st.caption("YoY/QoQ actuals from the parsed result filing — cross-check "
+                               "against the guidance stated above.")
+
+            sym = match_symbol(comp)
+            if sym:
+                _nav_row([sym], "guidance_tracker")
 
 # ================================================================ Movers
 if PAGE == "🗺️ Market Map":
@@ -728,6 +1414,11 @@ if PAGE == "🚀 Movers":
                 _hint(f"No gainer matches “{mv_q}”." if mv_q else
                       "No data yet — run the collector to populate this.")
             else:
+                top5_rows = list(zip(gg["symbol"].head(5), gg["perChange"].head(5)))
+                SNAP.record("movers_gainers", top5_rows)
+                st.markdown(T.rank_boxes(top5_rows, "{:+.2f}", "%"), unsafe_allow_html=True)
+                _nav_row([s for s, _ in top5_rows], "movers")
+                _dropout_note("movers_gainers", [s for s, _ in top5_rows])
                 st.dataframe(gg, width="stretch", height=360, hide_index=True)
     with mc2:
         with card():
@@ -755,6 +1446,24 @@ if PAGE == "🚀 Movers":
 
 # ================================================================ Smart Money
 if PAGE == "💰 Smart Money":
+    with card():
+        st.markdown(G.head("FII / DII — cash market (₹ Cr)", "fii", "dii"), unsafe_allow_html=True)
+        fd = load_snapshot_latest("fii_dii_activity")
+        if not fd.empty and {"category", "buyValue", "sellValue", "netValue"} <= set(fd.columns):
+            fd = _num(fd, ["buyValue", "sellValue", "netValue"])
+            cards = []
+            for _, r in fd.iterrows():
+                net = r["netValue"]
+                cards.append(T.stat_card(r["category"], f"₹{net:+,.0f} Cr", "net",
+                                         "up" if net >= 0 else "down", arrow=True))
+            st.markdown(T.stat_row(cards), unsafe_allow_html=True)
+            st.dataframe(fd[["category", "date", "buyValue", "sellValue", "netValue"]]
+                         .rename(columns={"buyValue": "Buy (Cr)", "sellValue": "Sell (Cr)",
+                                           "netValue": "Net (Cr)", "category": "Category", "date": "Date"}),
+                         width="stretch", hide_index=True)
+        else:
+            _hint("Needs a daily/snapshot run to populate fii_dii_activity.")
+
     for label, name in [("Bulk deals", "bulk_deals"), ("Block deals", "block_deals")]:
         with card():
             st.markdown(f"#### {label} — who's trading big")
@@ -772,6 +1481,13 @@ if PAGE == "💰 Smart Money":
                 v = v[v["Symbol"].astype(str).str.upper().str.contains(sym)]
             if {"QuantityTraded", "TradePrice/Wght.Avg.Price"} <= set(v.columns):
                 v["Value(Cr)"] = (v["QuantityTraded"] * v["TradePrice/Wght.Avg.Price"]) / 1e7
+                top5 = v.sort_values("Value(Cr)", ascending=False).head(5)
+                if "Symbol" in top5.columns and not top5.empty:
+                    top5_rows = list(zip(top5["Symbol"], top5["Value(Cr)"]))
+                    SNAP.record(f"smart_money_{name}", top5_rows)
+                    st.markdown(T.rank_boxes(top5_rows, "₹{:,.1f}", " Cr"), unsafe_allow_html=True)
+                    _nav_row([s for s, _ in top5_rows], f"sm_{name}")
+                    _dropout_note(f"smart_money_{name}", [s for s, _ in top5_rows])
             st.dataframe(v, width="stretch", height=300, hide_index=True)
 
     s1, s2 = st.columns(2)
@@ -841,8 +1557,13 @@ if PAGE == "📉 Derivatives & FII":
             if not mau.empty:
                 mau = _num(mau, ["totTurnover", "latestOI", "totVolume"])
                 keep = [c for c in ["symbol", "totVolume", "totTurnover", "latestOI"] if c in mau.columns]
-                st.dataframe(mau[keep].sort_values("totTurnover", ascending=False),
-                             width="stretch", height=300, hide_index=True)
+                mauv = mau[keep].sort_values("totTurnover", ascending=False)
+                top5_rows = list(zip(mauv["symbol"].head(5), mauv["totTurnover"].head(5)))
+                SNAP.record("derivatives_active", top5_rows)
+                st.markdown(T.rank_boxes(top5_rows, "₹{:,.0f}", " Cr"), unsafe_allow_html=True)
+                _nav_row([s for s, _ in top5_rows], "deriv")
+                _dropout_note("derivatives_active", [s for s, _ in top5_rows])
+                st.dataframe(mauv, width="stretch", height=300, hide_index=True)
             else:
                 _hint()
     with d2:
@@ -880,6 +1601,11 @@ if PAGE == "📦 Delivery & Value":
                                 "DELIV_QTY", "TURNOVER_LACS"] if c in b.columns]
             top = apply_search(b, dv_q, ["SYMBOL"]).sort_values(
                 "DELIV_PER", ascending=False)[keep].head(50)
+            top5_rows = list(zip(top["SYMBOL"].head(5), top["DELIV_PER"].head(5)))
+            SNAP.record("delivery_value", top5_rows)
+            st.markdown(T.rank_boxes(top5_rows, "{:.0f}", "%"), unsafe_allow_html=True)
+            _nav_row([s for s, _ in top5_rows], "delivery")
+            _dropout_note("delivery_value", [s for s, _ in top5_rows])
             st.dataframe(
                 top.style.background_gradient(subset=["DELIV_PER"], cmap="Greens")
                          .background_gradient(subset=["%Chg"], cmap="RdYlGn")
@@ -1050,6 +1776,12 @@ if PAGE == "🔔 Need Attention":
             if v.empty:
                 st.success("No such events in the collected window.")
             else:
+                if "Filed" in v.columns and "symbol" in v.columns:
+                    recent = v.sort_values("Filed", ascending=False).head(5)
+                    st.markdown(T.rank_boxes(
+                        [(r["symbol"], r.get("Event", "—"), r.get("Filed", ""))
+                         for _, r in recent.iterrows()]), unsafe_allow_html=True)
+                    _nav_row(recent["symbol"].tolist(), "needattn")
                 st.dataframe(v[show], width="stretch", height=460, hide_index=True,
                              column_config={"Attachment": st.column_config.LinkColumn("Attachment")})
                 st.caption(f"{len(v)} events.")
@@ -1115,6 +1847,20 @@ if PAGE == "📈 History":
                         columns={"OPEN_PRICE": "open", "HIGH_PRICE": "high",
                                  "LOW_PRICE": "low", "CLOSE_PRICE": "close"})
                     C.show(C.candlestick(recs, _DARK))
+
+            if exch == "NSE index":
+                nh = niftyindices_history(hsym)
+                if not nh.empty and {"PE", "PB", "DIV_YIELD"} <= set(nh.columns):
+                    with card():
+                        st.markdown(G.head("Valuation trend — P/E, P/B, Div Yield", "pe"),
+                                    unsafe_allow_html=True)
+                        st.caption("Source: niftyindices.com daily snapshot — not archived "
+                                   "anywhere else for most index families.")
+                        vcol1, vcol2 = st.columns(2)
+                        with vcol1:
+                            C.show(C.lines(nh.set_index("date")[["PE", "PB"]], _DARK))
+                        with vcol2:
+                            C.show(C.lines(nh.set_index("date")["DIV_YIELD"], _DARK, colors=[T.GREEN], area=True))
 
             cH1, cH2 = st.columns(2)
             with cH1:
@@ -1304,6 +2050,11 @@ if PAGE == "🔎 Screener":
                 keep = ["SYMBOL", "CLOSE_PRICE", "%Chg", "DELIV_PER", "TURNOVER_LACS",
                         "P/E", "Ann.Vol", "%FromHigh"]
                 out = m[keep].sort_values("%Chg", ascending=False)
+                top5_rows = list(zip(out["SYMBOL"].head(5), out["%Chg"].head(5)))
+                SNAP.record("screener", top5_rows)
+                st.markdown(T.rank_boxes(top5_rows, "{:+.2f}", "%"), unsafe_allow_html=True)
+                _nav_row([s for s, _ in top5_rows], "screener")
+                _dropout_note("screener", [s for s, _ in top5_rows])
                 st.dataframe(
                     out.style.background_gradient(subset=["%Chg"], cmap="RdYlGn")
                        .background_gradient(subset=["DELIV_PER"], cmap="Greens")
@@ -1312,6 +2063,76 @@ if PAGE == "🔎 Screener":
                                 "%FromHigh": "{:+.1f}"}, na_rep="-"),
                     width="stretch", height=460, hide_index=True)
                 st.caption(f"Bhav copy date: {per_date_dates('bhavcopy_delivery')[-1]}")
+
+# ================================================================ Value & PEG
+if PAGE == "💎 Value & PEG":
+    st.caption("Stocks at a sane P/E, ranked by PEG. Earnings growth is implied "
+               "from the warehouse (close ÷ P/E gives TTM EPS, compared across the "
+               "stored history and annualised) — a proxy for reported growth, not a "
+               "substitute for it.")
+    vdf, vmeta = peg_table()
+    if vdf.empty:
+        _hint("Needs the bhav copy and P/E report — fetch/backfill first.")
+    elif vmeta.get("window_days", 0) < V.MIN_WINDOW_DAYS:
+        _hint(f"Only {vmeta.get('window_days', 0)} days of overlapping history — "
+              f"need {V.MIN_WINDOW_DAYS}+ before growth means anything. Backfill more dates.")
+    else:
+        f1, f2, f3 = st.columns(3)
+        pe_lo, pe_hi = f1.slider("P/E band", 0.0, 100.0, (10.0, 25.0), 1.0, key="vp_pe")
+        max_peg = f2.slider("Max PEG", 0.1, 3.0, 1.0, 0.1, key="vp_peg")
+        min_to = f3.slider("Min turnover (₹ cr)", 0.0, 50.0, 2.0, 0.5, key="vp_to")
+        f4, f5, f6 = st.columns(3)
+        below_sector = f4.checkbox("Cheaper than its sector median", key="vp_sec")
+        min_growth = f5.slider("Min growth %", 0.0, 100.0, 10.0, 5.0, key="vp_g")
+        # sorting by PEG otherwise floats the biggest implied growth to the top,
+        # and that is exactly where a small earnings base distorts the number most
+        max_growth = f6.slider("Max growth %", 50.0, V.MAX_GROWTH, 100.0, 25.0, key="vp_gmax")
+        vq = search("vp_q", "Search", "symbol, company or industry")
+
+        m = vdf[vdf["P/E"].between(pe_lo, pe_hi)
+                & vdf["PEG"].notna() & (vdf["PEG"] <= max_peg)
+                & vdf["Growth %"].between(min_growth, max_growth)
+                & (vdf["Turnover Cr"].fillna(0) >= min_to)]
+        if below_sector:
+            m = m[m["vs Sector %"] < 0]
+        m = apply_search(m, vq, ["Symbol", "Name", "Industry"])
+        m = m.sort_values("PEG")
+
+        st.markdown(T.stat_row([
+            T.stat_card("Matches", f"{len(m):,}", "stocks pass filters",
+                        "up" if len(m) else "neutral"),
+            T.stat_card("Median P/E", f'{m["P/E"].median():.1f}' if len(m) else "—",
+                        "of matches", "neutral"),
+            T.stat_card("Median PEG", f'{m["PEG"].median():.2f}' if len(m) else "—",
+                        "1.0 = fairly priced for growth", "neutral"),
+            T.stat_card("Growth window", f'{vmeta["window_days"]}d',
+                        f'{vmeta["base_date"]} → {vmeta["latest_date"]}', "neutral"),
+        ]), unsafe_allow_html=True)
+
+        with card():
+            st.markdown("#### Reasonable P/E, cheapest PEG first")
+            if m.empty:
+                _hint("No stocks match — widen the P/E band or raise max PEG.")
+            else:
+                top5 = list(zip(m["Symbol"].head(5), m["PEG"].head(5)))
+                SNAP.record("value_peg", top5)
+                st.markdown(T.rank_boxes(top5, "{:.2f}", " PEG"), unsafe_allow_html=True)
+                _nav_row([s for s, _ in top5], "value_peg")
+                _dropout_note("value_peg", [s for s, _ in top5])
+                st.dataframe(
+                    m.style.background_gradient(subset=["PEG"], cmap="RdYlGn_r")
+                     .background_gradient(subset=["Growth %"], cmap="Greens")
+                     .format({"Close": "{:,.2f}", "P/E": "{:.1f}", "Sector P/E": "{:.1f}",
+                              "vs Sector %": "{:+.0f}", "EPS then": "{:,.2f}",
+                              "EPS now": "{:,.2f}", "Growth %": "{:+.1f}", "PEG": "{:.2f}",
+                              "Turnover Cr": "{:,.1f}", "Delivery %": "{:.0f}",
+                              "% From High": "{:+.1f}"}, na_rep="-"),
+                    width="stretch", height=520, hide_index=True)
+                st.caption(
+                    f"{vdf['P/E'].notna().sum():,} stocks priced, "
+                    f"{vdf['PEG'].notna().sum():,} with a usable PEG. Blank PEG means "
+                    f"loss-making, shrinking earnings, or growth off too small a base "
+                    f"(>{V.MAX_GROWTH:.0f}%) to trust — never a filled-in guess.")
 
 # ================================================================ Peer Compare
 if PAGE == "⚖️ Peer Compare":
@@ -1410,6 +2231,11 @@ if PAGE == "🧩 F&O / Options":
             with card():
                 st.markdown(G.head("Most active underlyings — by OI", "oi", "fno"), unsafe_allow_html=True)
                 by_oi = f.groupby("SYM")["OpnIntrst"].sum().nlargest(15)
+                top5_rows = list(by_oi.head(5).items())
+                SNAP.record("fno_oi", top5_rows)
+                st.markdown(T.rank_boxes(top5_rows, "{:,.0f}"), unsafe_allow_html=True)
+                _nav_row([s for s, _ in top5_rows], "fno")
+                _dropout_note("fno_oi", [s for s, _ in top5_rows])
                 C.show(C.hbar(by_oi, _DARK, color=T.INDIGO))
         with o2:
             with card():
@@ -1652,6 +2478,15 @@ if PAGE == "🧾 Result Scorecard":
                 if view.empty:
                     _hint("No companies match these filters.")
                 else:
+                    top5 = view.dropna(subset=["PAT YoY %"]).sort_values(
+                        "PAT YoY %", ascending=False).head(5)
+                    if not top5.empty:
+                        top5_rows = list(zip(top5["Company"], top5["PAT YoY %"]))
+                        SNAP.record("result_scorecard", top5_rows)
+                        st.markdown(T.rank_boxes(top5_rows, "{:+.1f}", "%"), unsafe_allow_html=True)
+                        nav_syms = [s for s in (match_symbol(c) for c in top5["Company"]) if s]
+                        _nav_row(nav_syms, "resscore")
+                        _dropout_note("result_scorecard", [c for c, _ in top5_rows])
                     st.dataframe(
                         view[["Company", "Verdict", "Grade", "Rev Cr", "Rev YoY %",
                               "Rev QoQ %", "EBITDA Cr", "EBITDA YoY %", "Margin %",
@@ -1740,6 +2575,93 @@ if PAGE == "🧾 Result Scorecard":
         G.legend("revenue", "ebitda", "pat", "operating_margin", "standalone",
                  "consolidated", "pnl")
 
+# ================================================================ Best of Quarter
+if PAGE == "🥇 Best of Quarter":
+    st.caption("Cross-checks the concall verdict against the result verdict for the same "
+               "quarter — surfaces companies where fundamentals agree both ways, and flags "
+               "the ones where they don't.")
+
+    bqs = sorted(set(concall_quarters()) | set(result_quarters()))
+    if not bqs:
+        _hint("No analyzed concalls or results yet — run those agents first.")
+    else:
+        bq = st.selectbox("Quarter", list(reversed(bqs)), key="bq_q")
+        cidx = concall_index(bq)
+        ridx = result_index(bq)
+        if cidx.empty and ridx.empty:
+            _hint(f"No concall or result index for {bq} yet — run those agents first.")
+        else:
+            cidx = cidx.copy()
+            ridx = ridx.copy()
+            cidx["_key"] = cidx["Company"].map(_company_key)
+            ridx["_key"] = ridx["Company"].map(_company_key)
+            merged = cidx.merge(ridx, on="_key", how="outer", suffixes=("_cc", "_res"))
+
+            merged["Company"] = merged["Company_cc"].fillna(merged["Company_res"])
+            for col in ["Verdict_cc", "Call", "Confidence"]:
+                merged[col] = merged[col].fillna("NA")
+            for col in ["Verdict_res", "Grade", "Rev YoY %", "PAT YoY %"]:
+                merged[col] = merged[col].fillna("NA")
+            merged["Flags"] = merged["Flags"].fillna(0)
+
+            has_cc = merged["Call"].ne("NA")
+            has_res = merged["Verdict_res"].ne("NA")
+            good_cc = has_cc & (merged["Call"].eq("BUY") | merged["Verdict_cc"].eq("GOOD"))
+            bad_cc = has_cc & (merged["Call"].isin(["AVOID", "SELL"]) | merged["Verdict_cc"].eq("BAD"))
+            good_res = has_res & merged["Verdict_res"].eq("GOOD")
+            bad_res = has_res & merged["Verdict_res"].eq("BAD")
+
+            merged["Combo"] = "Mixed / unclear"
+            merged.loc[~has_res, "Combo"] = "❔ No result"
+            merged.loc[~has_cc, "Combo"] = "❔ No concall"
+            merged.loc[good_cc & good_res, "Combo"] = "✅ Both GOOD"
+            merged.loc[bad_cc & bad_res, "Combo"] = "🚩 Both BAD"
+            merged.loc[good_cc & bad_res, "Combo"] = "⚠️ Concall up, result down"
+            merged.loc[bad_cc & good_res, "Combo"] = "⚠️ Result up, concall down"
+
+            both_good = int((merged["Combo"] == "✅ Both GOOD").sum())
+            both_bad = int((merged["Combo"] == "🚩 Both BAD").sum())
+            conflict = int(merged["Combo"].str.startswith("⚠️").sum())
+            st.markdown(T.stat_row([
+                T.stat_card("Companies", f"{len(merged)}", f"concall + result union for {bq}", "neutral"),
+                T.stat_card("Both GOOD", f"{both_good}", "concall + result agree bullish", "up"),
+                T.stat_card("Both BAD", f"{both_bad}", "concall + result agree bearish", "down"),
+                T.stat_card("Conflicting", f"{conflict}", "concall and result disagree", "neutral"),
+            ]), unsafe_allow_html=True)
+
+            with card():
+                st.markdown(G.head("Companies with both a concall and a result", "concall", "pat"),
+                            unsafe_allow_html=True)
+                combos = ["All", "✅ Both GOOD", "🚩 Both BAD",
+                          "⚠️ Concall up, result down", "⚠️ Result up, concall down",
+                          "Mixed / unclear", "❔ No concall", "❔ No result"]
+                bqf = st.selectbox("Filter", combos, key="bq_filter")
+                view = merged if bqf == "All" else merged[merged["Combo"] == bqf]
+                if view.empty:
+                    _hint("No companies match this combination for the quarter.")
+                else:
+                    best = merged[merged["Combo"] == "✅ Both GOOD"].copy()
+                    best["PAT YoY %"] = pd.to_numeric(best["PAT YoY %"], errors="coerce")
+                    best = best.dropna(subset=["PAT YoY %"]).sort_values(
+                        "PAT YoY %", ascending=False).head(5)
+                    if not best.empty:
+                        top5_rows = list(zip(best["Company"], best["PAT YoY %"]))
+                        SNAP.record("best_of_quarter", top5_rows)
+                        st.markdown(T.rank_boxes(top5_rows, "{:+.1f}", "%"), unsafe_allow_html=True)
+                        nav_syms = [s for s in (match_symbol(c) for c in best["Company"]) if s]
+                        _nav_row(nav_syms, "bestq")
+                        _dropout_note("best_of_quarter", [c for c, _ in top5_rows])
+                    show = view.rename(columns={
+                        "Verdict_cc": "Concall verdict",
+                        "Call": "Concall call", "Verdict_res": "Result verdict",
+                        "Grade": "Result grade",
+                    })[["Company", "Combo", "Concall verdict", "Concall call",
+                        "Confidence", "Result verdict", "Result grade",
+                        "Rev YoY %", "PAT YoY %", "Flags"]]
+                    st.dataframe(show, width="stretch", height=380, hide_index=True)
+                    st.caption("Company match is name-based — a miss here usually means the "
+                               "concall and result filings spell the company slightly differently.")
+
 # ================================================================ Settings
 if PAGE == "⚙️ Settings":
     st.caption("Fetch and maintain the local data warehouse.")
@@ -1790,6 +2712,31 @@ if PAGE == "⚙️ Settings":
                     st.success(f"Done — {summ.line()}")
                     st.cache_data.clear()
     with card():
+        st.markdown("#### 📐 niftyindices.com data")
+        st.caption("Daily index snapshot — every NSE index family (broad, sectoral, "
+                   "thematic, strategy, fixed income, G-Sec, SDL, corporate bond) with "
+                   "OHLC, turnover and P/E, P/B, Div Yield. Broader coverage + valuation "
+                   "history than NSE's own live index snapshot.")
+        ni1, ni2 = st.columns(2)
+        with ni1:
+            if st.button("⬇️ Fetch latest", key="ni_daily", width="stretch"):
+                with st.spinner("Fetching niftyindices.com snapshot…"):
+                    summ = _niftyindices_collector().run_daily()
+                st.success(f"Done — {summ.line()}")
+                st.cache_data.clear()
+        with ni2:
+            ni_from = st.date_input("From", value=dt.date.today() - dt.timedelta(days=7), key="ni_from")
+            ni_to = st.date_input("To", value=dt.date.today(), key="ni_to")
+        if st.button("⏪ Backfill range", key="ni_bf", width="stretch"):
+            if ni_from > ni_to:
+                st.error("From date must be ≤ To date.")
+            else:
+                with st.spinner(f"Backfilling niftyindices {ni_from} → {ni_to}…"):
+                    summ = _niftyindices_collector().run_backfill(ni_from, ni_to)
+                st.success(f"Done — {summ.line()}")
+                st.cache_data.clear()
+
+    with card():
         st.markdown("#### 📄 Result PDFs")
         st.caption("Parse everything in `result-pdf/` into the fundamentals warehouse. "
                    "Full control and the parsed statements live on the "
@@ -1832,11 +2779,11 @@ if PAGE == "⚙️ Settings":
             with st.expander("Agent output", expanded=True):
                 st.code(st.session_state["agent_log"], language="text")
     with card():
-        st.markdown("#### 📞 Concall analyzer (agent)")
-        st.caption("Hand a quarter folder to the `concall-analyzer` agent — each transcript "
-                   "becomes an investor-grade Markdown report that stays in that quarter "
-                   "folder, then the PDF moves into `done/`. Read the reports on the "
-                   "**📞 Concalls** page.")
+        st.markdown("#### 📞 Concall reader (skill)")
+        st.caption("Hand a quarter folder to the `concall-reader` skill — each transcript "
+                   "becomes a transcript-only Markdown report + JSON snapshot that stay in "
+                   "that quarter folder, then the PDF moves into `done/`. Read the reports on "
+                   "the **📞 Concalls** page.")
         cq = concall_pdf_quarters()
         if not cq:
             _hint("No quarter folders under `concall-data/` — create e.g. "
@@ -1849,16 +2796,16 @@ if PAGE == "⚙️ Settings":
             with cc2:
                 cscope = st.selectbox("Scope", ["All pending"] + cpend, key="concall_scope")
             st.caption(f"{len(cpend)} transcript(s) pending in `concall-data/{cquarter}/`.")
-            if st.button("📞 Run concall-analyzer", key="concall_run", width="stretch",
+            if st.button("📞 Run concall-reader", key="concall_run", width="stretch",
                          type="primary", disabled=not cpend):
                 n = 1 if cscope != "All pending" else len(cpend)
-                with st.spinner(f"Agent reading {n} transcript(s) — each does its own "
-                                "web research, so this can take a while…"):
+                with st.spinner(f"Reading {n} transcript(s)…"):
                     ccode, clog = _run_concall_analyzer(
                         cquarter, None if cscope == "All pending" else cscope)
                 st.cache_data.clear()
                 (st.success if ccode == 0 else st.error)(
-                    "Agent finished." if ccode == 0 else "Agent exited with errors.")
+                    "Concall reader finished." if ccode == 0
+                    else "Concall reader exited with errors.")
                 st.session_state["concall_log"] = clog
         if st.session_state.get("concall_log"):
             with st.expander("Agent output", expanded=True):

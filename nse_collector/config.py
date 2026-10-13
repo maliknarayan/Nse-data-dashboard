@@ -80,6 +80,11 @@ DATASETS: list[dict] = [
      "fn": "capital_market.corporate_actions_for_equity", "params": {}, "key": None},
     {"name": "earnings_calendar", "kind": "date_range", "group": "filings",
      "fn": "capital_market.event_calendar_for_equity", "params": {}, "key": None},
+    # reported quarterly numbers straight from the filing — 68 columns per result
+    {"name": "financial_results", "kind": "date_range", "group": "filings",
+     "fn": "capital_market.financial_results_for_equity", "params": {}, "key": None},
+    {"name": "india_vix", "kind": "date_range", "group": "indices",
+     "fn": "capital_market.india_vix_data", "params": {}, "key": None},
 
     # ---- snapshot: live state only, cannot be backfilled ----
     # gainers/losers repeat a symbol across index buckets -> key includes legend
@@ -135,6 +140,8 @@ DATASETS: list[dict] = [
      "fn": "derivatives.fno_security_in_ban_period", "params": {}, "key": None},
     {"name": "daily_volatility", "kind": "per_date", "group": "reports",
      "fn": "capital_market.daily_volatility", "params": {}, "key": None},
+    {"name": "sme_bhavcopy", "kind": "per_date", "group": "bhav",
+     "fn": "capital_market.bhav_copy_sme", "params": {}, "key": None},
 ]
 
 

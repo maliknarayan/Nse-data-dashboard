@@ -27,6 +27,10 @@ data/_watchlist_state.json
 *.sqlite
 *.db
 
+# Agent scratch (pdf text dumps, temp extracts)
+_concall_tmp.txt
+*_text.txt
+
 # Logs
 logs/
 *.log
@@ -42,3 +46,4 @@ Thumbs.db
 *.swp
 
 .playwright-mcp
+reference-file/

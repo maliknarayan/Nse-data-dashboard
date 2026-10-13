@@ -15,6 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard import loader as L
+from dashboard import valuation as V
 
 # cache the warehouse reads; sidebar button clears it after a fresh collection
 _cache = st.cache_data(ttl=300)
@@ -31,15 +32,18 @@ bse_symbols = _cache(L.bse_symbols)
 bse_symbol_history = _cache(L.bse_symbol_history)
 index_history = _cache(L.index_history)
 index_names = _cache(L.index_names)
+niftyindices_history = _cache(L.niftyindices_history)
 concall_quarters = _cache(L.concall_quarters)
 # uncached — the analyzer moves files mid-session, these must always be live
 concall_pdf_quarters = L.concall_pdf_quarters
 concall_pending = L.concall_pending
 concall_index = _cache(L.concall_index)
+concall_summary = _cache(L.concall_summary)
 concall_text = _cache(L.concall_text)
 match_symbol = _cache(L.match_symbol)
 industry_map = _cache(L.industry_map)
 market_map = _cache(L.market_map)
+peg_table = _cache(V.peg_table)
 result_pdfs = _cache(L.result_pdfs)
 result_quarters = _cache(L.result_quarters)
 # uncached — the analyzer moves files mid-session, these must always be live
@@ -47,6 +51,10 @@ result_pdf_quarters = L.result_pdf_quarters
 result_pending = L.result_pending
 result_summary = _cache(L.result_summary)
 result_index = _cache(L.result_index)
+concall_peers = _cache(L.concall_peers)
+ratio_hits = _cache(L.ratio_hits)
+industry_ratios = L.industry_ratios
+ratio_family = L.ratio_family
 fundamentals_symbols = _cache(L.fundamentals_symbols)
 fundamentals_doc = _cache(L.fundamentals_doc)
 fundamentals_facts = _cache(L.fundamentals_facts)
@@ -141,6 +149,18 @@ def _bse_collector(polite: float = 1.0):
     return BseCollector(s)
 
 
+def _niftyindices_collector(polite: float = 1.0):
+    from niftyindices.collect import NiftyIndicesCollector
+    from nse_collector.collector import setup_logging
+    from nse_collector.config import Settings
+    s = Settings()
+    s.data_dir = L.DATA_DIR
+    s.log_dir = os.path.join(os.path.dirname(L.DATA_DIR), "logs")
+    s.polite_delay = polite
+    setup_logging(s)
+    return NiftyIndicesCollector(s)
+
+
 def _parse_results(single: str | None = None, rebuild: bool = False) -> tuple[int, str]:
     """Run the result-PDF parser in-process and hand back (exit code, log)."""
     import contextlib
@@ -189,11 +209,39 @@ def _run_analyzer(quarter: str, single: str | None = None,
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
+def _concall_tidy(target: str, done: str, pdf: str, before: set[str]) -> str:
+    """Retire a processed transcript — the agent no longer touches the filesystem.
+
+    Doing this here keeps rm/mv off the agent's permission surface; an unallowed
+    Bash call is a hard stop in headless -p mode, not a prompt.
+    """
+    import glob
+    import shutil
+
+    made = sorted(n for n in set(os.listdir(target)) - before
+                  if n.endswith((".md", ".json")))
+    if not any(n.endswith(".md") for n in made):
+        return f"--- {pdf}: no report written, PDF left in place"
+    for scratch in glob.glob(os.path.join(target, "*_text.txt")):
+        try:
+            os.remove(scratch)
+        except OSError:
+            pass
+    try:
+        os.makedirs(done, exist_ok=True)
+        shutil.move(os.path.join(target, pdf), os.path.join(done, pdf))
+    except OSError as exc:
+        return f"--- {pdf}: wrote {', '.join(made)} but could not retire PDF — {exc}"
+    return f"--- {pdf}: wrote {', '.join(made)}, PDF moved to done/"
+
+
 def _run_concall_analyzer(quarter: str, single: str | None = None,
                           timeout: int = 3600) -> tuple[int, str]:
-    """Drive the concall-analyzer agent headlessly over one quarter folder."""
+    """Drive the concall-reader skill headlessly over one quarter folder."""
     import shutil
     import subprocess
+
+    from dashboard import concall_merge
 
     exe = shutil.which("claude")
     if not exe:
@@ -208,17 +256,18 @@ def _run_concall_analyzer(quarter: str, single: str | None = None,
         return 1, f"No transcripts pending in concall-data/{quarter}."
 
     logs, worst = [], 0
-    # one agent run per transcript — each does its own web research, so batching them blows context
+    # one run per transcript to keep each run's context to a single document
     for name in files:
         prompt = (
-            f"Analyze the earnings concall transcript at {os.path.join(target, name)}.\n"
-            f"Write the complete report as a Markdown file inside {target} — that quarter "
-            f"folder is the only place it may go. Name it <Company>_{quarter}.md, taking the "
-            f"company name from the transcript and using underscores for spaces.\n"
-            f"Once the .md exists on disk, move the source PDF into {done}."
+            f"Use the concall-reader skill.\n"
+            f"Read the earnings concall transcript at {os.path.join(target, name)}.\n"
+            f"Write both outputs inside {target} — that quarter folder is the only "
+            f"place they may go. Follow the skill's naming rules for the filenames.\n"
+            f"Do not move the PDF and do not clean up scratch files — stop after "
+            f"the second write."
         )
-        cmd = [exe, "-p", prompt, "--agent", "concall-analyzer",
-               "--permission-mode", "acceptEdits"]
+        cmd = [exe, "-p", prompt, "--permission-mode", "acceptEdits"]
+        before = set(os.listdir(target))
         try:
             r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=timeout)
             out, code = (r.stdout + r.stderr).strip(), r.returncode
@@ -226,6 +275,17 @@ def _run_concall_analyzer(quarter: str, single: str | None = None,
             out, code = f"timed out after {timeout}s", 1
         worst = max(worst, code)
         logs.append(f"=== {name} (exit {code}) ===\n{out}")
+        if code == 0:
+            logs.append(_concall_tidy(target, done, name, before))
+
+    # the agents no longer touch concalls-summary.json — rebuild it once, here
+    try:
+        data = concall_merge.build(target)
+        concall_merge.write(target, data)
+        logs.append(f"=== concalls-summary.json rebuilt ({data['count']} concalls) ===")
+    except Exception as exc:
+        worst = max(worst, 1)
+        logs.append(f"=== concalls-summary.json rebuild FAILED ===\n{exc}")
     return worst, "\n\n".join(logs)
 
 

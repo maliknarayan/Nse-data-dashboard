@@ -143,10 +143,12 @@ class Collector:
             log.info("ok %s %s: %d rows", name, cal.to_iso(d), rows)
             self.summary.written.append(f"{name}:{cal.to_iso(d)}")
         except Exception as exc:  # noqa: BLE001
-            # per_date treats errors as holidays/skips by default
-            log.info("skip %s %s (error treated as holiday: %s)",
-                     name, cal.to_iso(d), exc)
-            self.summary.skipped.append(f"{name}:{cal.to_iso(d)}")
+            if cal.is_trading_day(d, self.s.holiday_product):
+                # real trading day, real failure -> surface it, don't bury it as a holiday
+                self._handle_fail(ds, exc, "per_date", cal.to_iso(d))
+            else:
+                log.info("skip %s %s (non-trading day: %s)", name, cal.to_iso(d), exc)
+                self.summary.skipped.append(f"{name}:{cal.to_iso(d)}")
 
     def _handle_fail(self, ds: dict, exc: Exception, kind: str, target: str):
         name = ds["name"]

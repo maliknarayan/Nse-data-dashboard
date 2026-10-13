@@ -522,6 +522,22 @@ def stat_row(cards: list[str]) -> str:
     return '<div class="stat-row">' + "".join(cards) + "</div>"
 
 
+def rank_boxes(rows: list[tuple], val_fmt: str = "{:+.1f}", suffix: str = "") -> str:
+    """rows = list of (symbol, value[, sub]) tuples, already top-N — renders as mini stat-card boxes."""
+    cards = []
+    for row in rows:
+        sym, val = row[0], row[1]
+        sub = row[2] if len(row) > 2 else ""
+        if val is None or (isinstance(val, float) and val != val):  # NaN-safe
+            vstr, tone = "—", "neutral"
+        elif isinstance(val, (int, float)):
+            vstr, tone = val_fmt.format(val) + suffix, ("up" if val >= 0 else "down")
+        else:
+            vstr, tone = str(val), "neutral"
+        cards.append(stat_card(str(sym), vstr, sub, tone, mini=True))
+    return stat_row(cards)
+
+
 def hero(title: str, sub: str) -> str:
     return f'<div class="hero"><h1>{title}</h1><div class="sub">{sub}</div></div>'
 

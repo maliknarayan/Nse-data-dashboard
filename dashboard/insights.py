@@ -5,8 +5,6 @@ warehouse DataFrames so they stay testable and backend-agnostic.
 
 from __future__ import annotations
 
-import re
-
 import pandas as pd
 
 from .loader import to_num
@@ -71,22 +69,6 @@ def fii_client_divergence(poi_all: pd.DataFrame) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------- portfolio
-def parse_holdings(text: str) -> pd.DataFrame:
-    """Parse pasted 'SYMBOL QTY AVGCOST' lines (space/comma/tab separated)."""
-    rows = []
-    for ln in text.strip().splitlines():
-        parts = [x for x in re.split(r"[,\t ]+", ln.strip()) if x]
-        if not parts:
-            continue
-        sym = parts[0].upper()
-        if sym in ("SYMBOL", "STOCK") or not re.match(r"^[A-Z&-]+$", sym):
-            continue
-        qty = to_num(pd.Series([parts[1]])).iloc[0] if len(parts) > 1 else None
-        avg = to_num(pd.Series([parts[2]])).iloc[0] if len(parts) > 2 else None
-        rows.append({"Symbol": sym, "Qty": qty, "AvgCost": avg})
-    return pd.DataFrame(rows)
-
-
 def portfolio_xray(holdings: pd.DataFrame, bhav: pd.DataFrame, scorer) -> pd.DataFrame:
     """Enrich holdings with LTP, P&L, conviction score+verdict. `scorer(sym)->dict`."""
     if holdings.empty:

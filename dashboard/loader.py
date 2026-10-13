@@ -184,6 +184,27 @@ def index_history(index: str) -> pd.DataFrame:
     return df.sort_values("date").reset_index(drop=True)
 
 
+def niftyindices_history(index: str) -> pd.DataFrame:
+    """Daily OHLC + P/E, P/B, Div Yield trend for one index, from niftyindices.com's
+    daily snapshot (broader index coverage + valuation ratios nselib's live
+    snapshot doesn't archive)."""
+    allb = load_per_date_all("niftyindices_snapshot")
+    if allb.empty or "Index Name" not in allb.columns:
+        return pd.DataFrame()
+    df = allb[allb["Index Name"].astype(str).str.strip().str.upper() == index.strip().upper()].copy()
+    if df.empty:
+        return df
+    ren = {"Open Index Value": "OPEN_PRICE", "High Index Value": "HIGH_PRICE",
+           "Low Index Value": "LOW_PRICE", "Closing Index Value": "CLOSE_PRICE",
+           "Change(%)": "%Chg", "P/E": "PE", "P/B": "PB", "Div Yield": "DIV_YIELD"}
+    df = df.rename(columns=ren)
+    for c in ["OPEN_PRICE", "HIGH_PRICE", "LOW_PRICE", "CLOSE_PRICE", "%Chg", "PE", "PB", "DIV_YIELD"]:
+        if c in df.columns:
+            df[c] = to_num(df[c])
+    df["date"] = df["_date"]
+    return df.sort_values("date").reset_index(drop=True)
+
+
 def index_names() -> list[str]:
     idx = load_snapshot_latest("all_indices")
     if idx.empty or "index" not in idx.columns:
@@ -196,13 +217,21 @@ import re as _re
 CONCALL_DIR = os.path.join(_PROJECT_ROOT, "concall-data")
 
 
+def _concall_md_dir(quarter: str) -> str:
+    """Reports live in quarter/md-files/ (newer layout) or the quarter root (older)."""
+    sub = os.path.join(CONCALL_DIR, quarter, "md-files")
+    if glob.glob(os.path.join(sub, "*.md")):
+        return sub
+    return os.path.join(CONCALL_DIR, quarter)
+
+
 def concall_quarters() -> list[str]:
     if not os.path.isdir(CONCALL_DIR):
         return []
     out = []
     for d in sorted(os.listdir(CONCALL_DIR)):
         p = os.path.join(CONCALL_DIR, d)
-        if os.path.isdir(p) and glob.glob(os.path.join(p, "*.md")):
+        if os.path.isdir(p) and glob.glob(os.path.join(_concall_md_dir(d), "*.md")):
             out.append(d)
     return out
 
@@ -213,10 +242,32 @@ def concall_pdf_quarters() -> list[str]:
                   if os.path.isdir(p) and os.path.basename(p) != "done")
 
 
+def concall_analyzed(quarter: str) -> set[str]:
+    """Source PDFs a report already exists for, by basename.
+
+    Snapshots record source_pdf inconsistently — full path in some, basename in
+    others — so both forms are normalized to a basename here.
+    """
+    qdir = os.path.join(CONCALL_DIR, quarter)
+    seen = {os.path.basename(p) for p in glob.glob(os.path.join(qdir, "done", "*.pdf"))}
+    for rec in concall_summary(quarter).get("concalls") or []:
+        src = str(rec.get("source_pdf") or "").replace("\\", "/").strip()
+        if src:
+            seen.add(os.path.basename(src))
+    return seen
+
+
 def concall_pending(quarter: str) -> list[str]:
-    """Transcripts in a quarter folder the analyzer hasn't moved into done/ yet."""
-    return sorted(os.path.basename(p)
-                  for p in glob.glob(os.path.join(CONCALL_DIR, quarter, "*.pdf")))
+    """Transcripts in a quarter folder that have no report yet.
+
+    A PDF can sit in the folder and in done/ at once (a copy that was never
+    cleaned up), so presence in the root is not proof it needs analyzing.
+    """
+    analyzed = concall_analyzed(quarter)
+    return sorted(name for name in
+                  (os.path.basename(p)
+                   for p in glob.glob(os.path.join(CONCALL_DIR, quarter, "*.pdf")))
+                  if name not in analyzed)
 
 
 def _parse_concall(path: str) -> dict:
@@ -241,22 +292,80 @@ def _parse_concall(path: str) -> dict:
     }
 
 
+def concall_summary(quarter: str) -> dict:
+    """Raw concalls-summary.json for one quarter (concall-reader's aggregated snapshot)."""
+    p = os.path.join(CONCALL_DIR, quarter, "concalls-summary.json")
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+_CONCALL_VERDICT_TONE = {
+    "BUY": "GOOD", "ACCUMULATE ON DIPS": "GOOD",
+    "HOLD": "HOLD", "WATCHLIST": "HOLD",
+    "AVOID": "BAD",
+}
+
+
 def concall_index(quarter: str) -> pd.DataFrame:
-    files = sorted(glob.glob(os.path.join(CONCALL_DIR, quarter, "*.md")))
+    """One screener row per company for a quarter.
+
+    Prefers the aggregated concalls-summary.json the concall-reader skill
+    maintains; falls back to parsing .md headers for quarters analyzed before
+    that file existed (the older concall-analyzer output format).
+    """
+    recs = concall_summary(quarter).get("concalls") or []
+    if recs:
+        by_pdf = {}
+        for r in recs:
+            key = r.get("source_pdf") or r.get("company")
+            prev = by_pdf.get(key)
+            if prev is None or str(r.get("analyzed_on") or "") >= str(prev.get("analyzed_on") or ""):
+                by_pdf[key] = r
+        rows = []
+        for r in by_pdf.values():
+            verdict = str(r.get("verdict") or "").upper()
+            rows.append({
+                "Company": r.get("company") or "—",
+                "Verdict": _CONCALL_VERDICT_TONE.get(verdict, "—"),
+                "Call": verdict or "—",
+                "Confidence": str(r.get("confidence") or "").upper(),
+                "Date": r.get("call_date") or r.get("analyzed_on") or "",
+                "_file": r.get("source_md") or "",
+            })
+        return pd.DataFrame(rows)
+
+    files = sorted(glob.glob(os.path.join(_concall_md_dir(quarter), "*.md")))
     rows = [_parse_concall(f) for f in files]
     rows = [r for r in rows if r]
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+    if rows:
+        return pd.DataFrame(rows)
+    return pd.DataFrame(columns=["Company", "Verdict", "Call", "Confidence", "Date", "_file"])
 
 
 def concall_text(quarter: str, filename: str) -> str:
-    p = os.path.join(CONCALL_DIR, quarter, filename)
-    if not os.path.exists(p):
-        return ""
+    for p in (os.path.join(CONCALL_DIR, quarter, filename),
+              os.path.join(_concall_md_dir(quarter), filename)):
+        if os.path.exists(p):
+            try:
+                with open(p, encoding="utf-8") as fh:
+                    return fh.read()
+            except Exception:
+                return ""
+    return ""
+
+
+def concall_from_md_fallback(quarter: str, company: str) -> dict | None:
+    """Fallback: read MD file directly if JSON snapshot unavailable."""
     try:
-        with open(p, encoding="utf-8") as fh:
-            return fh.read()
-    except Exception:
-        return ""
+        from dashboard import concall_md_reader
+        return concall_md_reader.fallback_read_concall(quarter, company)
+    except ImportError:
+        return None
 
 
 def match_symbol(company: str) -> str | None:
@@ -280,17 +389,33 @@ def match_symbol(company: str) -> str | None:
     return best
 
 
-def industry_map() -> dict:
-    """symbol -> industry. Corporate announcements are the only feed carrying it,
-    so coverage is partial (roughly the names that filed something)."""
-    ann = load_growing("corporate_announcements")
-    if ann.empty or not {"symbol", "Industry"} <= set(ann.columns):
+def _industry_pairs(dataset: str, sym_col: str, ind_col: str) -> dict:
+    df = load_growing(dataset)
+    if df.empty or not {sym_col, ind_col} <= set(df.columns):
         return {}
-    m = ann[["symbol", "Industry"]].dropna()
-    m["symbol"] = m["symbol"].astype(str).str.strip().str.upper()
-    m["Industry"] = m["Industry"].astype(str).str.strip()
-    m = m[m["Industry"].ne("") & m["Industry"].ne("-") & m["symbol"].ne("")]
-    return dict(m.drop_duplicates("symbol").values)
+    m = df[[sym_col, ind_col]].dropna()
+    m[sym_col] = m[sym_col].astype(str).str.strip().str.upper()
+    m[ind_col] = m[ind_col].astype(str).str.strip()
+    m = m[m[ind_col].ne("") & m[ind_col].ne("-") & m[sym_col].ne("")]
+    return dict(m.drop_duplicates(sym_col).values)
+
+
+def industry_map() -> dict:
+    """symbol -> industry, from both feeds that carry one.
+
+    Index constituents cover ~1,000 names but only in 22 broad NIFTY sectors;
+    corporate announcements are finer ('Pharmaceuticals', not 'Healthcare') but
+    only tag companies that actually filed. Broad first, fine wins on overlap.
+    """
+    out = sector_map()
+    out.update(_industry_pairs("corporate_announcements", "symbol", "Industry"))
+    return out
+
+
+def sector_map() -> dict:
+    """symbol -> broad NIFTY sector, index constituents only. One taxonomy for
+    everyone, so a peer group doesn't split across two granularities."""
+    return _industry_pairs("index_constituents", "Symbol", "Industry")
 
 
 _SIZE_BANDS = [(500, "Mega (₹500cr+)"), (100, "Large (₹100-500cr)"),
@@ -442,6 +567,164 @@ def result_index(quarter: str) -> pd.DataFrame:
             "Date": r.get("analyzed_on") or "",
             "_i": i,
         })
+    if rows:
+        return pd.DataFrame(rows)
+    return pd.DataFrame(columns=["Company", "Verdict", "Grade", "Rev Cr", "Rev YoY %",
+                                  "Rev QoQ %", "EBITDA Cr", "EBITDA YoY %", "Margin %",
+                                  "Margin bps", "PAT Cr", "PAT YoY %", "PAT QoQ %", "Basis",
+                                  "SME", "Tags", "Flags", "Date", "_i"])
+
+
+_PEER_STOP = {"LIMITED", "LTD", "PVT", "PRIVATE", "THE", "CO"}
+_PEER_NUM = ["Rev Cr", "Rev YoY %", "EBITDA YoY %", "Margin %", "Margin bps", "PAT YoY %"]
+PEER_COLS = (["Company", "Symbol", "Industry", "Sub-industry", "Verdict", "Call",
+              "Confidence", "Result verdict", "Grade"] + _PEER_NUM + ["Date", "_file"])
+
+
+def _peer_key(name: str) -> str:
+    toks = [t for t in _re.sub(r"[^A-Z0-9 ]", " ", str(name or "").upper()).split()
+            if t not in _PEER_STOP]
+    return "".join(toks)
+
+
+def _peer_symbol(company: str) -> str:
+    """match_symbol is loose — it lands 'All E Technologies' on ABDL. Keep a hit
+    only when the NSE name actually starts the same way, or a wrong symbol drags
+    the company into a wrong peer group."""
+    sym = match_symbol(company) or ""
+    if not sym:
+        return ""
+    head = _peer_key(company)[:4]
+    return sym if head and head in _peer_key(company_map().get(sym, "")) else ""
+
+
+def concall_peers(quarter: str) -> pd.DataFrame:
+    """A quarter's concall companies tagged with NSE industry and result numbers.
+
+    Left join off the concall index — the peer set is whoever actually held a call.
+    Industry comes from corporate announcements, so names it doesn't cover land in
+    'Unclassified' instead of dropping out of the table.
+    """
+    cidx = concall_index(quarter)
+    if cidx.empty:
+        return pd.DataFrame(columns=PEER_COLS)
+
+    out = cidx.copy()
+    out["_key"] = out["Company"].map(_peer_key)
+    ridx = result_index(quarter)
+    if not ridx.empty:
+        r = ridx.copy()
+        r["_key"] = r["Company"].map(_peer_key)
+        r = (r[["_key", "Verdict", "Grade"] + _PEER_NUM]
+             .rename(columns={"Verdict": "Result verdict"})
+             .drop_duplicates("_key"))
+        out = out.merge(r, on="_key", how="left")
+    for col in ["Result verdict", "Grade"]:
+        out[col] = out.get(col, pd.Series(dtype=object)).fillna("—")
+    for col in _PEER_NUM:
+        out[col] = pd.to_numeric(out.get(col), errors="coerce")
+
+    # group on the broad sector so peers land together; keep the finer filing tag
+    sectors, inds = sector_map(), industry_map()
+    out["Symbol"] = out["Company"].map(_peer_symbol)
+    out["Industry"] = out["Symbol"].map(
+        lambda s: sectors.get(s) or inds.get(s) or "Unclassified")
+    out["Sub-industry"] = out["Symbol"].map(lambda s: inds.get(s) or "—")
+    # one company, two transcripts (a re-run under a new filename) — keep the newest
+    out["_dedupe"] = out["Symbol"].where(out["Symbol"].ne(""), out["_key"])
+    out["_when"] = pd.to_datetime(out["Date"], errors="coerce", format="mixed")
+    out = out.sort_values("_when", na_position="first").drop_duplicates("_dedupe", keep="last")
+    return out[PEER_COLS].sort_values("Company").reset_index(drop=True)
+
+
+# the ratios each family is actually judged on, with the words a transcript uses for them
+_RATIO_SETS = {
+    "lender": (
+        ("NIM", ("nim", "net interest margin", "net interest income", "nii")),
+        ("Asset quality", ("gnpa", "nnpa", "stage 3", "slippage", "npa", "gross npa")),
+        ("Credit cost", ("credit cost", "credit loss", "provision", "provisioning")),
+        ("Book growth", ("advances", "aum", "disbursement", "loan book", "credit growth")),
+        ("Funding", ("casa", "deposit", "cost of funds", "cost of borrowing")),
+        ("Return ratios", ("roa", "roe", "return on asset", "return on equity")),
+        ("Capital", ("capital adequacy", "cet-1", "cet1", "tier 1", "tier-1", "crar")),
+        ("Cost ratio", ("cost-to-income", "cost to income", "cost-to-assets", "opex")),
+    ),
+    "pharma": (
+        ("Gross margin", ("gross margin", "gross profit")),
+        ("EBITDA margin", ("ebitda margin", "operating margin")),
+        ("R&D spend", ("r&d", "research and development")),
+        ("US / export mix", ("us market", "us business", "export", "formulation", "anda")),
+        ("Price erosion", ("price erosion", "pricing pressure", "realisation", "realization")),
+        ("Regulatory", ("usfda", "fda", "inspection", "observation", "form 483", "warning letter")),
+        ("Capacity", ("utilisation", "utilization", "capex", "debottleneck", "capacity")),
+    ),
+    "it": (
+        ("Revenue growth cc", ("constant currency", "cc growth", "revenue growth")),
+        ("EBIT margin", ("ebit margin", "operating margin", "ebitda margin")),
+        ("Deal wins / TCV", ("deal win", "tcv", "order book", "bookings", "pipeline")),
+        ("Attrition", ("attrition", "headcount", "utilisation", "utilization")),
+        ("Client mix", ("client", "top 10", "vertical", "geography")),
+        ("Billing rate", ("billing rate", "realisation", "pricing", "per capita")),
+    ),
+    "telecom": (
+        ("ARPU", ("arpu", "average revenue per user")),
+        ("Subscribers", ("subscriber", "net adds", "user base")),
+        ("Churn", ("churn",)),
+        ("EBITDA margin", ("ebitda margin", "operating margin")),
+        ("Capex / network", ("capex", "network rollout", "spectrum", "tower")),
+        ("Leverage", ("net debt", "leverage", "debt/ebitda", "deleverag")),
+    ),
+    "industrial": (
+        ("EBITDA margin", ("ebitda margin", "operating margin")),
+        ("Gross margin", ("gross margin", "raw material", "rm cost")),
+        ("Order book", ("order book", "order inflow", "l1", "tender", "backlog")),
+        ("Volume growth", ("volume", "tonnage", "realisation", "realization")),
+        ("Capacity", ("utilisation", "utilization", "capex", "capacity", "expansion")),
+        ("Working capital", ("working capital", "receivable", "inventory", "debtor")),
+        ("Leverage", ("net debt", "leverage", "debt/ebitda", "borrowing")),
+    ),
+}
+
+
+def ratio_family(industry: str) -> str:
+    s = str(industry or "").lower()
+    if "bank" in s or "financ" in s or "nbfc" in s:
+        return "lender"
+    if "pharma" in s or "healthcare" in s or "hospital" in s or "drug" in s:
+        return "pharma"
+    if "software" in s or "computers" in s or "it enabled" in s:
+        return "it"
+    if "telecom" in s:
+        return "telecom"
+    return "industrial"
+
+
+def industry_ratios(industry: str) -> tuple:
+    """The ratio set this industry is read on — labels plus the words to look for."""
+    return _RATIO_SETS[ratio_family(industry)]
+
+
+def ratio_hits(quarter: str, industry: str, companies: tuple[str, ...]) -> pd.DataFrame:
+    """Which of the industry's standard ratios each peer actually discussed on its call.
+
+    Text search over the snapshot's own highlights and monitorables — a blank means
+    the analysis never recorded that ratio, not that management stayed silent on it.
+    """
+    ratios = industry_ratios(industry)
+    blobs: dict[str, str] = {}
+    for r in concall_summary(quarter).get("concalls") or []:
+        parts = [str(r.get("verdict_rationale") or "")]
+        parts += [str(h.get("point") or "") for h in (r.get("highlights") or [])
+                  if isinstance(h, dict)]
+        parts += [str(m) for m in (r.get("key_monitorables") or [])]
+        key = _peer_key(r.get("company"))
+        blobs[key] = blobs.get(key, "") + " " + " ".join(parts).lower()
+    rows = []
+    for company in companies:
+        txt = blobs.get(_peer_key(company), "")
+        rows.append({"Company": company,
+                     **{label: ("✓" if any(w in txt for w in words) else "")
+                        for label, words in ratios}})
     return pd.DataFrame(rows)
 
 
