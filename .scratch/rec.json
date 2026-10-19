@@ -1,0 +1,39 @@
+{
+  "company": "CCL Products (India) Ltd",
+  "source_pdf": "ac6a2647-0f4d-4ccc-8659-4101c055586a.pdf",
+  "quarter": "Q2FY27",
+  "basis": "consolidated",
+  "is_sme": null,
+  "currency_unit": "Cr",
+  "qoq_base_reliable": true,
+  "financials": {
+    "revenue":        { "current": 1210.76, "yoy": 1126.73, "qoq": 1200.43, "yoy_pct": 7.46, "qoq_pct": 0.86 },
+    "ebitda":         { "current": 212.09,  "yoy": 197.13,  "qoq": 193.55,  "yoy_pct": 7.59, "qoq_pct": 9.58 },
+    "ebitda_margin":  { "current": 17.52,   "yoy": 17.50,   "qoq": 16.12,   "yoy_bps": 2, "qoq_bps": 139 },
+    "pbt":            { "current": 150.86,  "yoy": 127.09,  "qoq": 129.02,  "yoy_pct": 18.70, "qoq_pct": 16.93 },
+    "pbt_ex_exceptional": { "current": 150.86, "yoy": 127.09, "qoq": 129.02, "yoy_pct": 18.70, "qoq_pct": 16.93 },
+    "pat_before_jv":  { "current": 130.09,  "yoy": 100.86,  "qoq": 116.87,  "yoy_pct": 28.98, "qoq_pct": 11.31 },
+    "pat":            { "current": 130.11,  "yoy": 100.86,  "qoq": 116.88,  "yoy_pct": 29.00, "qoq_pct": 11.32 },
+    "pat_after_minority": { "current": 130.11, "yoy": 100.86, "qoq": 116.88, "yoy_pct": 29.00, "qoq_pct": 11.32 },
+    "other_income":   { "current": 5.23,    "yoy": 1.48,    "qoq": 3.14,    "yoy_pct": 253.38, "qoq_pct": 66.56 },
+    "depreciation":   { "current": 40.47,   "yoy": 38.89,   "qoq": 39.01 },
+    "finance_cost":   { "current": 25.98,   "yoy": 32.63,   "qoq": 28.67 },
+    "exceptional_item": { "current": null, "yoy": null, "qoq": null }
+  },
+  "verdict": "MIXED",
+  "sub_verdict": "Average",
+  "tags": ["QoQ Strong"],
+  "verdict_reason": "Revenue only +7.46% YoY and EBITDA +7.59% with margin flat at 17.52% vs 17.50% — operations grew mid-single-digit. PAT +29.00% is not operating: finance cost fell 32.63 to 25.98 Cr and the tax rate dropped to 13.8% from 20.6%. Strip those and this is a modest quarter.",
+  "positives": [
+    "EBITDA margin 17.52%, up 139 bps QoQ from 16.12%",
+    "Finance cost down 20% YoY to 25.98 Cr",
+    "PBT 150.86 Cr, up 18.70% YoY"
+  ],
+  "red_flags": [
+    "Revenue up only 7.46% YoY and 0.86% QoQ — growth has stalled sequentially",
+    "PAT +29% YoY flattered by tax rate 13.8% vs 20.6% YoY"
+  ],
+  "notes": "Rs in Lakhs in the filing, converted to Cr. Current and YoY columns cross-foot exactly to printed Total Income, Total Expenses and PBT; QoQ column carries ~Rs 4-6 lakh of OCR noise in the expense lines (0.006% of base), so QoQ EBITDA is derived from printed PBT plus depreciation and finance cost less other income. Single reportable segment. Consolidated includes 5 subsidiaries and 1 associate; no minority interest.",
+  "post_text": "CCL Products (India) Ltd Q2FY27 Results:-\n#Q2Results #Q2FY27 #Stockmarket #Nifty #CCL\n\nRevenue 1210.76 Cr vs 1126.73 Cr\n(+7.46% YoY┃+0.86% QoQ)\n\nEBITDA 212.09 Cr vs 197.13 Cr\n(+7.59% YoY ┃+9.58% QoQ)\n\nEBITDA Margin 17.52% vs 17.50% YoY & 16.12% QoQ\n\nPBT 150.86 Cr vs 127.09 Cr\n(+18.70% YoY┃+16.93% QoQ)\n\nPAT Before Share of Associates 130.09 Cr vs 100.86 Cr\n(+28.98% YoY┃+11.31% QoQ)\n\nPAT 130.11 Cr vs 100.86 Cr\n(+29.00% YoY┃+11.32% QoQ)\n\nOther Income 5.23 Cr vs 1.48 Cr YoY & 3.14 Cr QoQ",
+  "analyzed_on": "2026-10-16"
+}

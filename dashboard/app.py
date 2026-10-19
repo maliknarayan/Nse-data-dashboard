@@ -28,6 +28,7 @@ from dashboard import charts as C  # noqa: E402
 from dashboard import glossary as G  # noqa: E402
 from dashboard import snapshots as SNAP  # noqa: E402
 from dashboard import valuation as V  # noqa: E402
+from dashboard import technicals as TA  # noqa: E402
 from dashboard.ui import (  # noqa: E402
     load_growing, load_snapshot_latest, load_per_date, per_date_dates,
     load_per_date_all, load_manifest, all_symbols, company_map, symbol_history,
@@ -83,7 +84,8 @@ NAV = {
     "📊 Overview": ["⭐ Top Ideas", "📊 Market Pulse", "📡 What's New", "🩺 Data Health", "⚙️ Settings"],
     "🎯 Ideas & Signals": ["🎯 Signals", "🔎 Screener", "💎 Value & PEG", "⚖️ Peer Compare",
                            "🏆 Conviction", "💼 Portfolio", "🧮 Capital Allocator"],
-    "📈 Markets": ["🗺️ Market Map", "🚀 Movers", "🗓️ Day Explorer", "🧭 Sectors", "📈 History"],
+    "📈 Markets": ["🗺️ Market Map", "🚀 Movers", "🗓️ Day Explorer", "🧭 Sectors", "📈 History",
+                   "📐 Darvas & Fib"],
     "💰 Flows & Derivatives": ["💰 Smart Money", "📉 Derivatives & FII",
                                "🧩 F&O / Options", "📦 Delivery & Value"],
     "📰 Filings & Calls": ["📞 Concalls", "🧬 Concall Peers", "📜 Guidance Tracker",
@@ -441,6 +443,8 @@ if PAGE == "🏆 Conviction":
             st.markdown(T.rank_boxes(top5_rows, "{:+d}"), unsafe_allow_html=True)
             _nav_row([s for s, _ in top5_rows], "conviction")
             _dropout_note("conviction", [s for s, _ in top5_rows])
+            C.show(C.hbar(lb.set_index("Symbol")["Score"].head(15), _DARK, diverge=True,
+                          height=380))
             lb = searched(lb, "conv_q", ["Symbol"], "Search", "symbol")
             st.dataframe(
                 lb.style.background_gradient(subset=["Score"], cmap="RdYlGn")
@@ -610,6 +614,27 @@ if PAGE == "💼 Portfolio":
             T.stat_card("Avg conviction", f'{px["Conviction"].dropna().mean():+.1f}'
                         if px["Conviction"].notna().any() else "—", "signal", "neutral"),
         ]), unsafe_allow_html=True)
+
+        pf1, pf2 = st.columns(2)
+        alloc = px.dropna(subset=["Current"])
+        alloc = alloc[alloc["Current"] > 0]
+        with pf1:
+            with card():
+                st.markdown("#### Allocation by market value")
+                if alloc.empty:
+                    _hint("No priced holdings yet.")
+                else:
+                    C.show(C.donut(alloc["Symbol"].tolist(), alloc["Current"].tolist(),
+                                   C.cycle(len(alloc)), _DARK, center=f'₹{cur:,.0f}'))
+        with pf2:
+            with card():
+                st.markdown("#### P&L % per holding")
+                pnl_s = px.dropna(subset=["P&L%"]).set_index("Symbol")["P&L%"]
+                if pnl_s.empty:
+                    _hint("No priced holdings yet.")
+                else:
+                    C.show(C.hbar(pnl_s.sort_values(ascending=False), _DARK, diverge=True,
+                                  height=220))
 
         with card():
             st.markdown(G.head("Holdings", "market_cap", "pe", "concall"), unsafe_allow_html=True)
@@ -790,6 +815,11 @@ if PAGE == "🧮 Capital Allocator":
 
                 pdf = pd.DataFrame(picks)[["Symbol", "Composite", "Weight %", "Allocated ₹",
                                           "LTP", "Shares", "Deployed ₹", "Concall", "Result", "Tags"]]
+                dep = pdf[pdf["Deployed ₹"] > 0]
+                if not dep.empty:
+                    C.show(C.donut(dep["Symbol"].tolist(), dep["Deployed ₹"].tolist(),
+                                   C.cycle(len(dep)), _DARK, center=f'₹{deployed:,.0f}',
+                                   height=260))
                 st.dataframe(
                     pdf.style.background_gradient(subset=["Composite"], cmap="RdYlGn")
                        .format({"Composite": "{:+.1f}", "Weight %": "{:.1f}", "Allocated ₹": "{:,.0f}",
@@ -982,6 +1012,16 @@ if PAGE == "📞 Concalls":
                            f"{str(cdoc['last_updated']).replace('T', ' ')}.")
 
             with card():
+                st.markdown("#### Call mix")
+                cc_mix = idx["Call"].replace("", pd.NA).dropna().value_counts()
+                if cc_mix.empty:
+                    _hint("No calls recorded for this quarter.")
+                else:
+                    C.show(C.donut(cc_mix.index.tolist(), cc_mix.values.tolist(),
+                                   C.cycle(len(cc_mix)), _DARK, center=str(len(idx)),
+                                   height=280))
+
+            with card():
                 st.markdown(G.head("🔝 Top 10 concalls this quarter", "concall", "guidance"),
                             unsafe_allow_html=True)
                 st.caption("Ranked by management confidence as read from the call.")
@@ -1067,6 +1107,16 @@ if PAGE == "🧬 Concall Peers":
                 _hint("No industry has two or more tagged concalls this quarter — industry "
                       "tags come from corporate announcements, so coverage is partial.")
             else:
+                med = peers[peers["Industry"].isin(groups)].groupby("Industry")["Rev YoY %"] \
+                           .median().dropna().sort_values(ascending=False)
+                if not med.empty:
+                    with card():
+                        st.markdown("#### Median revenue YoY % by industry")
+                        st.caption(f"{int(peers['Rev YoY %'].notna().sum())} of {len(peers)} "
+                                   f"peers in {pq} have a reported result to median.")
+                        C.show(C.hbar(med, _DARK, diverge=True,
+                                      height=max(220, len(med) * 28 + 60)))
+
                 ind = st.selectbox("Industry", groups, key="peer_ind",
                                    format_func=lambda i: f"{i} ({counts[i]})")
                 g = peers[peers["Industry"] == ind]
@@ -1419,6 +1469,8 @@ if PAGE == "🚀 Movers":
                 st.markdown(T.rank_boxes(top5_rows, "{:+.2f}", "%"), unsafe_allow_html=True)
                 _nav_row([s for s, _ in top5_rows], "movers")
                 _dropout_note("movers_gainers", [s for s, _ in top5_rows])
+                C.show(C.hbar(gg.set_index("symbol")["perChange"].head(10), _DARK,
+                              color=T.GREEN, height=280))
                 st.dataframe(gg, width="stretch", height=360, hide_index=True)
     with mc2:
         with card():
@@ -1428,8 +1480,10 @@ if PAGE == "🚀 Movers":
                 _hint(f"No loser matches “{mv_q}”." if mv_q else
                       "No data yet — run the collector to populate this.")
             else:
-                st.dataframe(ll.sort_values("perChange"), width="stretch",
-                             height=360, hide_index=True)
+                ls = ll.sort_values("perChange")
+                C.show(C.hbar(ls.set_index("symbol")["perChange"].head(10), _DARK,
+                              color=T.CORAL, height=280))
+                st.dataframe(ls, width="stretch", height=360, hide_index=True)
 
     a1, a2 = st.columns(2)
     for col, (label, name) in zip((a1, a2), [("By value", "most_active_value"), ("By volume", "most_active_volume")]):
@@ -1441,8 +1495,12 @@ if PAGE == "🚀 Movers":
                     _hint(); continue
                 df = _num(df, ["lastPrice", "pChange", "totalTradedValue", "totalTradedVolume"])
                 keep = [c for c in ["symbol", "lastPrice", "pChange", "totalTradedVolume", "totalTradedValue"] if c in df.columns]
-                st.dataframe(apply_search(df[keep], mv_q, ["symbol"]),
-                             width="stretch", height=300, hide_index=True)
+                ma = apply_search(df[keep], mv_q, ["symbol"])
+                mcol = "totalTradedValue" if name.endswith("value") else "totalTradedVolume"
+                if mcol in ma.columns and ma[mcol].notna().any():
+                    C.show(C.hbar(ma.set_index("symbol")[mcol].nlargest(10), _DARK,
+                                  color=T.INDIGO, height=260))
+                st.dataframe(ma, width="stretch", height=300, hide_index=True)
 
 # ================================================================ Smart Money
 if PAGE == "💰 Smart Money":
@@ -1599,6 +1657,13 @@ if PAGE == "📦 Delivery & Value":
             b = b[b["TURNOVER_LACS"] >= min_to]
             keep = [c for c in ["SYMBOL", "CLOSE_PRICE", "%Chg", "DELIV_PER", "TTL_TRD_QNTY",
                                 "DELIV_QTY", "TURNOVER_LACS"] if c in b.columns]
+            scat = apply_search(b, dv_q, ["SYMBOL"])
+            if not scat.dropna(subset=["DELIV_PER", "%Chg"]).empty:
+                st.caption("Top-right quadrant = price up on high delivery — accumulation.")
+                C.show(C.scatter(scat, "DELIV_PER", "%Chg", "SYMBOL", _DARK,
+                                 color="%Chg", size="TURNOVER_LACS", height=400,
+                                 xtitle="Delivery %", ytitle="% change",
+                                 vline=50, hline=0))
             top = apply_search(b, dv_q, ["SYMBOL"]).sort_values(
                 "DELIV_PER", ascending=False)[keep].head(50)
             top5_rows = list(zip(top["SYMBOL"].head(5), top["DELIV_PER"].head(5)))
@@ -1702,6 +1767,12 @@ if PAGE == "🗂️ Filings":
                 v = v[hay.str.contains(qa)]
             if indf != "All" and "Industry" in v.columns:
                 v = v[v["Industry"] == indf]
+            if "sort_date" in v.columns:
+                per_day = pd.to_datetime(v["sort_date"], errors="coerce").dt.date \
+                            .value_counts().sort_index().tail(90)
+                if len(per_day) > 1:
+                    st.caption("Filings per day — last 90 days with activity.")
+                    C.show(C.lines(per_day, _DARK, area=True, height=240))
             show = [c for c in ["Filed", "symbol", "Company", "Subject", "Industry", "Attachment"] if c in v.columns]
             st.dataframe(v[show].head(300), width="stretch", height=430, hide_index=True,
                          column_config={"Attachment": st.column_config.LinkColumn("Attachment")})
@@ -1763,6 +1834,12 @@ if PAGE == "🔔 Need Attention":
         for ev in ["Buyback", "Demerger", "Merger / Amalgamation", "Delisting"]:
             cards.append(T.stat_card(ev, f"{int(counts.get(ev, 0))}", "filings", "neutral"))
         st.markdown(T.stat_row(cards), unsafe_allow_html=True)
+
+        if not counts.empty:
+            with card():
+                st.markdown("#### Flagged events by type")
+                C.show(C.hbar(counts, _DARK, color=T.INDIGO,
+                              height=max(200, len(counts) * 34 + 60)))
 
         with card():
             st.markdown("#### Flagged events")
@@ -1878,6 +1955,113 @@ if PAGE == "📈 History":
     else:
         st.info("Search a symbol to see its history.")
 
+# ================================================================ Darvas & Fib
+if PAGE == "📐 Darvas & Fib":
+    st.caption("Darvas boxes and Fibonacci retracement on daily OHLC. A box is a "
+               "consolidation range — ceiling confirmed by bars that fail to clear it, "
+               "floor by bars that fail to break it. Levels are drawn off the swing in "
+               "the chosen window.")
+
+    dsym = symbol_select("Symbol", key="df_sym")
+    dh = symbol_history(dsym) if dsym else pd.DataFrame()
+    if not dsym:
+        _hint("Pick a symbol.")
+    elif dh.empty:
+        _hint("No history for this symbol — backfill bhav copies in the sidebar.")
+    elif len(dh) < 60:
+        _hint(f"Only {len(dh)} bars collected for {dsym} — needs 60 to place a box or a swing. "
+              f"Backfill more bhav copies in the sidebar.")
+    else:
+        raw_n = len(dh)
+        dh = TA.one_bar_per_day(dh)
+        dh, events = TA.back_adjust(dh)
+        if raw_n > len(dh):
+            st.caption(f"{raw_n - len(dh)} duplicate day"
+                       f"{'s' if raw_n - len(dh) > 1 else ''} dropped — {dsym} traded in "
+                       f"two series on the same date.")
+        if events:
+            st.warning(f"{dsym} has {len(events)} split/bonus adjustment"
+                       f"{'s' if len(events) > 1 else ''} in this window "
+                       f"({', '.join(str(e['date']) for e in events)}). Prices are "
+                       f"back-adjusted so the levels below are continuous.")
+
+        n_bars = len(dh)
+        o1, o2, o3, o4 = st.columns(4)
+        confirm = o1.slider("Box confirmation bars", 1, 10, 3, 1, key="df_confirm")
+        hi_look = o2.slider("New-high window (bars)", 10, max(20, n_bars // 2),
+                            min(52, max(20, n_bars // 2)), 2, key="df_look")
+        fib_look = o3.slider("Fib swing window (bars)", 20, n_bars,
+                             min(120, n_bars), 10, key="df_fib")
+        bars_n = o4.slider("Bars to show", 30, n_bars, n_bars, 10, key="df_bars")
+
+        view = dh.tail(bars_n)
+        boxes = [b for b in TA.darvas_boxes(dh, confirm=confirm, lookback=hi_look)
+                 if b["end"] >= view["date"].iat[0]]
+        fib = TA.fib_levels(dh, lookback=fib_look)
+
+        s1, s2 = st.columns(2)
+        show_box = s1.checkbox("Show Darvas boxes", True, key="df_showbox")
+        show_fib = s2.checkbox("Show Fibonacci levels", True, key="df_showfib")
+
+        last_close = view["CLOSE_PRICE"].iat[-1]
+        live = next((b for b in reversed(boxes) if b["exit"] == "open"), None)
+        st.markdown(T.stat_row([
+            T.stat_card("Last close", f"{last_close:,.2f}", str(view["date"].iat[-1]), "neutral"),
+            T.stat_card("Boxes in view", f"{len(boxes)}",
+                        f"{sum(1 for b in boxes if b['exit'] == 'breakout')} broke out, "
+                        f"{sum(1 for b in boxes if b['exit'] == 'breakdown')} broke down",
+                        "neutral"),
+            T.stat_card("Live box", f"{live['bottom']:,.2f}–{live['top']:,.2f}" if live else "—",
+                        "floor–ceiling, unresolved" if live else "no open box",
+                        "up" if live else "neutral"),
+            T.stat_card("Swing", f"{fib['low']:,.2f}→{fib['high']:,.2f}" if fib else "—",
+                        ("leg up, retracing down" if fib["up"] else "leg down, retracing up")
+                        if fib else "no range in window", "neutral"),
+        ]), unsafe_allow_html=True)
+
+        with card():
+            st.markdown(G.head("Price with boxes and levels", "ltp", "gap_up"),
+                        unsafe_allow_html=True)
+            recs = view[["date", "OPEN_PRICE", "HIGH_PRICE", "LOW_PRICE", "CLOSE_PRICE"]].rename(
+                columns={"OPEN_PRICE": "open", "HIGH_PRICE": "high",
+                         "LOW_PRICE": "low", "CLOSE_PRICE": "close"})
+            C.show(C.candlestick(recs, _DARK, height=520,
+                                 boxes=boxes if show_box else None,
+                                 levels=(fib.get("levels") if fib and show_fib else None)))
+            if show_box and not boxes:
+                st.caption(f"No box formed — no bar set a {hi_look}-bar high that then held "
+                           f"for {confirm} bars. Widen the window or loosen confirmation.")
+
+        db1, db2 = st.columns(2)
+        with db1:
+            with card():
+                st.markdown("#### Boxes")
+                if not boxes:
+                    _hint("No boxes with these settings.")
+                else:
+                    bt = pd.DataFrame(boxes)
+                    bt["height %"] = (bt["top"] - bt["bottom"]) / bt["bottom"] * 100
+                    st.dataframe(
+                        bt[["start", "end", "bottom", "top", "height %", "exit"]]
+                          .sort_values("start", ascending=False)
+                          .style.format({"bottom": "{:,.2f}", "top": "{:,.2f}",
+                                         "height %": "{:.1f}"}),
+                        width="stretch", height=300, hide_index=True)
+        with db2:
+            with card():
+                st.markdown("#### Fibonacci levels")
+                if not fib:
+                    _hint("No usable swing in this window.")
+                else:
+                    st.caption(f"Swing low {fib['low']:,.2f} on {fib['low_date']} · "
+                               f"swing high {fib['high']:,.2f} on {fib['high_date']}.")
+                    ft = pd.DataFrame({"Level": [f"{r * 100:.1f}%" for r in fib["levels"]],
+                                       "Price": list(fib["levels"].values())})
+                    ft["Distance %"] = (last_close - ft["Price"]) / ft["Price"] * 100
+                    st.dataframe(ft.style.format({"Price": "{:,.2f}",
+                                                  "Distance %": "{:+.1f}"}),
+                                 width="stretch", height=300, hide_index=True)
+
 # ================================================================ Day Explorer
 if PAGE == "🗓️ Day Explorer":
     st.caption("Datewise view derived from the bhav copy — gainers, losers, most "
@@ -1959,6 +2143,17 @@ if PAGE == "🩺 Data Health":
             cc = [T.stat_card("Datasets with data", int(ok), "collected", "up"),
                   T.stat_card("Write events", len(man), "total runs logged", "neutral")]
             st.markdown(T.stat_row(cc), unsafe_allow_html=True)
+            if "status" in man.columns:
+                _s = man["status"].astype(str)
+                man["_class"] = "error"
+                man.loc[_s.str.startswith("ok"), "_class"] = "ok"
+                man.loc[_s.str.startswith("empty"), "_class"] = "empty"
+                mat = pd.crosstab(man["dataset"], man["_class"])
+                mat = mat[[c for c in ["ok", "empty", "error"] if c in mat.columns]]
+                mat = mat.loc[mat.sum(axis=1).sort_values(ascending=False).index]
+                st.caption("Every logged run per dataset, by outcome.")
+                C.show(C.stacked(mat, _DARK, colors=[T.GREEN, "#F5C451", T.CORAL],
+                                 horizontal=True, height=max(320, len(mat) * 22 + 80)))
             dh = searched(last[keep].sort_values("dataset"), "dh_q",
                           ["dataset", "kind", "status"], "Search", "dataset or status")
             st.dataframe(dh, width="stretch", height=460, hide_index=True)
@@ -2055,6 +2250,10 @@ if PAGE == "🔎 Screener":
                 st.markdown(T.rank_boxes(top5_rows, "{:+.2f}", "%"), unsafe_allow_html=True)
                 _nav_row([s for s, _ in top5_rows], "screener")
                 _dropout_note("screener", [s for s, _ in top5_rows])
+                if out.dropna(subset=["P/E", "%Chg"]).shape[0] > 1:
+                    C.show(C.scatter(out, "P/E", "%Chg", "SYMBOL", _DARK, color="%Chg",
+                                     size="TURNOVER_LACS", height=380,
+                                     xtitle="P/E", ytitle="% change", hline=0))
                 st.dataframe(
                     out.style.background_gradient(subset=["%Chg"], cmap="RdYlGn")
                        .background_gradient(subset=["DELIV_PER"], cmap="Greens")
@@ -2119,6 +2318,11 @@ if PAGE == "💎 Value & PEG":
                 st.markdown(T.rank_boxes(top5, "{:.2f}", " PEG"), unsafe_allow_html=True)
                 _nav_row([s for s, _ in top5], "value_peg")
                 _dropout_note("value_peg", [s for s, _ in top5])
+                if m.dropna(subset=["Growth %", "P/E"]).shape[0] > 1:
+                    st.caption("Bottom-right = high growth at a low multiple. Bubble = turnover.")
+                    C.show(C.scatter(m, "Growth %", "P/E", "Symbol", _DARK, color="vs Sector %",
+                                     size="Turnover Cr", height=400,
+                                     xtitle="EPS growth %", ytitle="P/E"))
                 st.dataframe(
                     m.style.background_gradient(subset=["PEG"], cmap="RdYlGn_r")
                      .background_gradient(subset=["Growth %"], cmap="Greens")
@@ -2457,6 +2661,27 @@ if PAGE == "🧾 Result Scorecard":
                 st.caption(f"Analyzer last wrote this file on "
                            f"{str(rdoc['last_updated']).replace('T', ' ')}.")
 
+            rv1, rv2 = st.columns([1, 2])
+            with rv1:
+                with card():
+                    st.markdown("#### Verdict mix")
+                    vc = ridx["Verdict"].value_counts()
+                    C.show(C.donut(vc.index.tolist(), vc.values.tolist(),
+                                   C.cycle(len(vc)), _DARK, center=str(len(ridx)),
+                                   height=280))
+            with rv2:
+                with card():
+                    st.markdown("#### Revenue vs PAT growth")
+                    rs = ridx.dropna(subset=["Rev YoY %", "PAT YoY %"])
+                    if rs.shape[0] < 2:
+                        _hint("Not enough companies with both growth figures.")
+                    else:
+                        st.caption("Top-right = revenue and profit both growing.")
+                        C.show(C.scatter(rs, "Rev YoY %", "PAT YoY %", "Company", _DARK,
+                                         color="PAT YoY %", height=280,
+                                         xtitle="Revenue YoY %", ytitle="PAT YoY %",
+                                         vline=0, hline=0))
+
             with card():
                 st.markdown(G.head("All analyzed results", "revenue", "ebitda", "pat",
                                    "operating_margin"), unsafe_allow_html=True)
@@ -2628,6 +2853,14 @@ if PAGE == "🥇 Best of Quarter":
                 T.stat_card("Both BAD", f"{both_bad}", "concall + result agree bearish", "down"),
                 T.stat_card("Conflicting", f"{conflict}", "concall and result disagree", "neutral"),
             ]), unsafe_allow_html=True)
+
+            ov = merged[has_cc & has_res]
+            if not ov.empty:
+                with card():
+                    st.markdown("#### Concall call vs result verdict")
+                    st.caption(f"{len(ov)} companies in {bq} have both a concall and a result.")
+                    mat = pd.crosstab(ov["Call"], ov["Verdict_res"])
+                    C.show(C.stacked(mat, _DARK, height=320))
 
             with card():
                 st.markdown(G.head("Companies with both a concall and a result", "concall", "pat"),

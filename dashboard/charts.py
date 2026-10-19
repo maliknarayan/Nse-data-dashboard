@@ -54,14 +54,31 @@ def show(fig: go.Figure) -> None:
                     config={"displayModeBar": False})
 
 
-def candlestick(df: pd.DataFrame, dark: bool, height: int = 360) -> go.Figure:
-    """df needs columns date/open/high/low/close (lowercase)."""
+def candlestick(df: pd.DataFrame, dark: bool, height: int = 360,
+                boxes: list[dict] | None = None, levels: dict | None = None) -> go.Figure:
+    """df needs columns date/open/high/low/close (lowercase).
+
+    boxes  = Darvas rectangles, each {start, end, top, bottom, exit}.
+    levels = {ratio: price} drawn as labelled horizontals.
+    """
     fig = go.Figure(go.Candlestick(
         x=df["date"], open=df["open"], high=df["high"], low=df["low"], close=df["close"],
         increasing_line_color=T.GREEN, decreasing_line_color=T.CORAL,
         increasing_fillcolor=T.GREEN, decreasing_fillcolor=T.CORAL, line_width=1))
     fig.update_layout(**_layout(dark, height))
     fig.update_layout(xaxis_rangeslider_visible=False, yaxis_title=None)
+    for b in boxes or []:
+        edge = {"breakout": T.GREEN, "breakdown": T.CORAL}.get(b["exit"], _muted(dark))
+        fig.add_shape(type="rect", x0=b["start"], x1=b["end"], y0=b["bottom"], y1=b["top"],
+                      line=dict(color=edge, width=1.4), fillcolor=_rgba(edge, 0.09),
+                      layer="below")
+    for ratio, price in (levels or {}).items():
+        fig.add_hline(y=price, line_width=1, line_dash="dot", line_color=T.INDIGO,
+                      annotation_text=f"{ratio * 100:.1f}% · {price:,.2f}",
+                      annotation_position="right",
+                      annotation_font=dict(family=_FONT, size=10, color=_muted(dark)))
+    if levels:
+        fig.update_layout(margin=dict(l=8, r=90, t=8, b=8))
     return fig
 
 
@@ -220,3 +237,73 @@ def lines(data, dark: bool, height: int = 300, area: bool = False,
                           legend=dict(orientation="h", y=1.12, x=0,
                                       font=dict(color=_muted(dark))))
     return fig
+
+
+def scatter(d: pd.DataFrame, x: str, y: str, label: str, dark: bool,
+            color=None, size: str | None = None, height: int = 360,
+            xtitle: str | None = None, ytitle: str | None = None,
+            vline: float | None = None, hline: float | None = None) -> go.Figure:
+    """Point cloud. color = a column name (diverging around 0) or a single hex."""
+    cols = [c for c in (x, y, color if color in d.columns else None) if c]
+    d = d.dropna(subset=cols)
+    if d.empty:
+        return go.Figure().update_layout(**_layout(dark, height))
+    marker = dict(line=dict(width=0), opacity=0.8)
+    if color and color in d.columns:
+        marker.update(color=d[color], colorscale=_diverge_scale(dark), cmid=0,
+                      colorbar=dict(title=color, thickness=10, outlinewidth=0,
+                                    tickfont=dict(family=_FONT, size=10, color=_muted(dark))))
+    else:
+        marker.update(color=color or T.INDIGO)
+    if size and size in d.columns:
+        s = d[size].clip(lower=0).fillna(0)
+        marker.update(size=s, sizemode="area", sizeref=max(s.max(), 1) / 900, sizemin=4)
+    else:
+        marker.update(size=7)
+    fig = go.Figure(go.Scattergl(
+        x=d[x], y=d[y], mode="markers", marker=marker, text=d[label].astype(str),
+        hovertemplate="<b>%{text}</b><br>" + x + ": %{x:,.2f}<br>" +
+                      y + ": %{y:,.2f}<extra></extra>"))
+    fig.update_layout(**_layout(dark, height))
+    fig.update_layout(xaxis_title=xtitle or x, yaxis_title=ytitle or y,
+                      margin=dict(l=8, r=8, t=8, b=40), hoverlabel=_map_hover(dark))
+    if vline is not None:
+        fig.add_vline(x=vline, line_width=1, line_dash="dot", line_color=_muted(dark))
+    if hline is not None:
+        fig.add_hline(y=hline, line_width=1, line_dash="dot", line_color=_muted(dark))
+    return fig
+
+
+def stacked(d: pd.DataFrame, dark: bool, colors: list[str] | None = None,
+            height: int = 320, horizontal: bool = False) -> go.Figure:
+    """Stacked bars. Index = category, one segment per column."""
+    if d.empty:
+        return go.Figure().update_layout(**_layout(dark, height))
+    palette = colors or [T.GREEN, T.INDIGO, "#F5C451", T.CORAL, T.INDIGO_DK]
+    fig = go.Figure()
+    cats = [str(i) for i in d.index]
+    for i, col in enumerate(d.columns):
+        c = palette[i % len(palette)]
+        fig.add_trace(go.Bar(
+            name=str(col), marker=dict(color=c, line_width=0),
+            **({"y": cats, "x": d[col], "orientation": "h"} if horizontal
+               else {"x": cats, "y": d[col]}),
+            hovertemplate="%{" + ("y" if horizontal else "x") + "} · " + str(col) +
+                          ": %{" + ("x" if horizontal else "y") + ":,.0f}<extra></extra>"))
+    fig.update_layout(**_layout(dark, height))
+    fig.update_layout(barmode="stack", showlegend=True,
+                      legend=dict(orientation="h", y=1.12, x=0,
+                                  font=dict(color=_muted(dark))))
+    if horizontal:
+        fig.update_layout(yaxis=dict(autorange="reversed", gridcolor="rgba(0,0,0,0)",
+                                     color=_muted(dark)))
+    return fig
+
+
+_CYCLE = ["#886CC0", "#09BD3C", "#F5C451", "#6C4FA8", "#2BB8C4", "#FC2E53",
+          "#B08BE0", "#4C9A6B", "#E08A3C", "#5A6ACF"]
+
+
+def cycle(n: int) -> list[str]:
+    """n distinct tile colours for donuts with an arbitrary number of slices."""
+    return [_CYCLE[i % len(_CYCLE)] for i in range(n)]

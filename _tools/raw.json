@@ -1,0 +1,40 @@
+{
+  "company": "Raghav Productivity Enhancers Ltd",
+  "source_pdf": "faf2e5da-0e5f-4728-8900-b1f405cfea80.pdf",
+  "q": "2FY27",
+  "qoq_label": "1",
+  "tag": "RPEL",
+  "basis": "consolidated",
+  "is_sme": false,
+  "currency_unit": "Cr",
+  "revenue": { "current": 92.81, "yoy": 63.59, "qoq": 86.97 },
+  "other_income": { "current": 1.10, "yoy": 0.62, "qoq": 0.92 },
+  "depreciation": { "current": 1.70, "yoy": 1.75, "qoq": 1.82 },
+  "finance_cost": { "current": 0.16, "yoy": 0.19, "qoq": 0.16 },
+  "pbt_ex_exceptional": { "current": 27.12, "yoy": 17.35, "qoq": 24.74 },
+  "pbt": { "current": 27.12, "yoy": 17.35, "qoq": 24.74 },
+  "pat": { "current": 21.63, "yoy": 13.84, "qoq": 19.57 },
+  "ebitda_override": { "current": 27.87, "yoy": 18.67, "qoq": 25.80 },
+  "exceptional_item": { "current": null, "yoy": null, "qoq": null },
+  "verdict": "GOOD",
+  "sub_verdict": "Solid",
+  "tags": ["Margin Expansion"],
+  "verdict_reason": "Revenue +45.97% YoY with EBITDA +49.27% and PAT +56.27% — every line growing faster than the one above it, and margin up 67 bps to 30.03%. Growth with operating leverage, no exceptional items, and other income at 4.1% of PBT, so none of it is borrowed from non-operating lines.",
+  "positives": [
+    "Revenue 92.81 Cr, +45.97% YoY and +6.72% QoQ",
+    "EBITDA 27.87 Cr, +49.27% YoY; margin 30.03% vs 29.36% YoY and 29.67% QoQ",
+    "PAT 21.63 Cr, +56.27% YoY and +10.52% QoQ",
+    "Cost of materials 20.30 Cr vs 18.10 Cr YoY — up only 12.1% against 45.97% revenue growth",
+    "Finance costs down to 0.16 Cr from 0.19 Cr; depreciation down to 1.70 Cr from 1.75 Cr — effectively debt-free",
+    "Sequential improvement on every line, so the YoY number is not a one-quarter spike",
+    "Joint venture RPEL TRLK Silicatech incorporated with TRL Krosaki Refractories on 25 September 2026"
+  ],
+  "red_flags": [
+    "Other expenses 39.43 Cr vs 24.99 Cr YoY, up 57.7% — growing faster than revenue and now 42.5% of the top line",
+    "Employee benefits 2.78 Cr vs 1.72 Cr YoY, +61.6%",
+    "Single-product, single-segment business (ramming mass) tied to the steel cycle",
+    "Inventory of finished goods drawn down 0.76 Cr this quarter against a 0.38 Cr build YoY"
+  ],
+  "notes": "Filed in Rs Lakhs and converted to Cr; EBITDA supplied from the Lakh-precision figures (2,786.94 / 1,867.04 / 2,580.29 Lakh) to avoid rounding drift. All three quarter columns cross-footed to printed Total Income, Total expenses and PBT. Consolidated includes wholly owned subsidiary Raghav Productivity Solutions Ltd; the 456.25 Lakh dividend from that subsidiary is eliminated on consolidation, so consolidated other income is clean of it. No exceptional items in any period. Listing board taken from the cover letter addressed to BSE Limited, Phiroze Jeejeebhoy Towers and NSE, Exchange Plaza — main board, not the SME platform.",
+  "qoq_base_reliable": true
+}
