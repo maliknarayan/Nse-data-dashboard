@@ -2616,10 +2616,60 @@ if PAGE == "🧾 Result Scorecard":
                ("pbt_ex_exceptional", "PBT ex-exceptional", "cr"), ("pat", "PAT", "cr"),
                ("pat_after_minority", "PAT after minority", "cr"),
                ("pat_before_jv", "PAT before JV", "cr"),
+               ("pbt_before_jv", "PBT before JV", "cr"),
+               ("pat_continuing_operations", "PAT continuing ops", "cr"),
                ("other_income", "Other income", "cr"),
                ("depreciation", "Depreciation", "cr"),
                ("finance_cost", "Finance cost", "cr"),
                ("exceptional_item", "Exceptional item", "cr")]
+
+    # sector lines the analyzer emits beyond the common set — (label, unit)
+    RS_IND = {
+        "total_income": ("Total income", "cr"),
+        "net_interest_income": ("Net interest income (NII)", "cr"),
+        "nii": ("Net interest income (NII)", "cr"),
+        "interest_income": ("Interest income", "cr"),
+        "fees_and_commission_income": ("Fees & commission income", "cr"),
+        "pre_provision_operating_profit": ("Pre-provision operating profit", "cr"),
+        "operating_profit_pre_provision": ("Pre-provision operating profit", "cr"),
+        "operating_profit_(pre_provision)": ("Pre-provision operating profit", "cr"),
+        "operating_profit_before_provisions": ("Pre-provision operating profit", "cr"),
+        "ppop_to_total_income_pct": ("PPOP / total income", "pct"),
+        "ppop_margin_on_revenue_pct": ("PPOP margin on revenue", "pct"),
+        "provisions": ("Provisions & contingencies", "cr"),
+        "provisions_and_contingencies": ("Provisions & contingencies", "cr"),
+        "impairment_on_financial_instruments": ("Impairment on financial instruments", "cr"),
+        "impairment_allowances": ("Impairment allowances", "cr"),
+        "net_loss_on_derecognition": ("Net loss on derecognition", "cr"),
+        "net_gain_fair_value": ("Net gain on fair value changes", "cr"),
+        "gross_npa_pct_standalone": ("Gross NPA", "pct"),
+        "capital_adequacy_pct_standalone": ("Capital adequacy (CAR)", "pct"),
+        "effective_tax_rate_pct": ("Effective tax rate", "pct"),
+        "net_worth": ("Net worth", "cr"),
+        "debt_equity": ("Debt / equity (x)", "num"),
+        "gross_premium_income": ("Gross premium income", "cr"),
+        "first_year_premium": ("First-year premium", "cr"),
+        "renewal_premium": ("Renewal premium", "cr"),
+        "single_premium": ("Single premium", "cr"),
+        "policyholders_surplus": ("Policyholders' surplus", "cr"),
+        "transfer_from_policyholders_ac": ("Transfer from policyholders' a/c", "cr"),
+        "operating_margin": ("Operating margin", "pct"),
+        "net_revenue_ex_excise": ("Net revenue (ex-excise)", "cr"),
+        "revenue_net_of_excise": ("Net revenue (ex-excise)", "cr"),
+        "ebitda_margin_on_net_revenue": ("EBITDA margin on net revenue", "pct"),
+        "ebitda_margin_net_of_excise": ("EBITDA margin on net revenue", "pct"),
+        "excise_duty_vat_tcs": ("Excise duty / VAT / TCS", "cr"),
+        "volumes_mt": ("Volumes (MT)", "num"),
+        "segment_revenue_zinc_lead": ("Segment revenue — zinc & lead", "cr"),
+        "segment_revenue_silver": ("Segment revenue — silver", "cr"),
+    }
+    RS_GENERIC = {k for k, _, _ in RS_ROWS}
+
+    def _rs_ind_label(k):
+        if k in RS_IND:
+            return RS_IND[k]
+        unit = "pct" if k.endswith("_pct") or "margin" in k else "num"
+        return k.replace("_", " ").strip().capitalize(), unit
 
     def _rs_fmt(v, unit):
         if v is None:
@@ -2733,6 +2783,8 @@ if PAGE == "🧾 Result Scorecard":
                        T.badge(rec.get("basis") or "—", "neutral")]
                 if rec.get("is_sme"):
                     _bd.append(T.badge("SME", "neutral"))
+                if rec.get("sector_profile") and rec["sector_profile"] != "default":
+                    _bd.append(T.badge(rec["sector_profile"].replace("_", " "), "neutral"))
                 _bd += [T.badge(t, "neutral") for t in (rec.get("tags") or [])]
                 st.markdown(" ".join(_bd), unsafe_allow_html=True)
 
@@ -2769,6 +2821,38 @@ if PAGE == "🧾 Result Scorecard":
                     st.markdown(T.table(pd.DataFrame(frows)), unsafe_allow_html=True)
                     st.caption(f"Values in ₹ {rec.get('currency_unit') or 'Cr'} as filed, "
                                f"{rec.get('basis') or 'unstated'} basis.")
+
+                # sector lines live both in financials and in bank_/nbfc_metrics
+                ind_src = {k: v for k, v in fin.items()
+                           if k not in RS_GENERIC and isinstance(v, dict)}
+                for _mk in ("bank_metrics", "nbfc_metrics"):
+                    ind_src.update({k: v for k, v in (rec.get(_mk) or {}).items()
+                                    if isinstance(v, dict)})
+                irows, _seen = [], set()
+                for k, blk in ind_src.items():
+                    if all(blk.get(p) is None for p in ("current", "yoy", "qoq")):
+                        continue
+                    lab, unit = _rs_ind_label(k)
+                    if lab in _seen:
+                        continue
+                    _seen.add(lab)
+                    irows.append({
+                        "Industry metric": lab,
+                        rq: _rs_fmt(blk.get("current"), unit),
+                        "YoY": _rs_fmt(blk.get("yoy"), unit),
+                        "YoY Δ": _rs_delta(blk, "yoy_pct", "yoy_bps"),
+                        "QoQ": _rs_fmt(blk.get("qoq"), unit),
+                        "QoQ Δ": _rs_delta(blk, "qoq_pct", "qoq_bps"),
+                    })
+                if irows:
+                    st.markdown("##### Industry metrics")
+                    st.markdown(T.table(pd.DataFrame(irows)), unsafe_allow_html=True)
+                    st.caption("Sector-specific lines for this company — read alongside "
+                               "the table above. Margins and ratios in %, rest in "
+                               f"₹ {rec.get('currency_unit') or 'Cr'}.")
+
+                if rec.get("highlight_text"):
+                    st.code(rec["highlight_text"], language="text")
 
                 if rec.get("verdict_reason"):
                     st.markdown("##### Why this verdict")

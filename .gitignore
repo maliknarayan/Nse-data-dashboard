@@ -49,3 +49,6 @@ Thumbs.db
 reference-file/
 .scratch-q2fy27/
 _tools/scratch/
+_scratch/
+scratch/rec.json
+tests/test_result_industry_rows.py
